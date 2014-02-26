@@ -126,3 +126,17 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
   LD_STATIC_OPTION " --whole-archive -ltsan --no-whole-archive " \
   LD_DYNAMIC_OPTION "}}%{!static-libtsan:-ltsan}"
 #endif
+
+/* We use this to make the compiler use -fPIE as default and link
+   with -pie.  */
+#ifdef ENABLE_DEFAULT_PIE
+#define PIE_DRIVER_SELF_SPECS \
+"%{pie|fpic|fPIC|fpie|fPIE|fno-pic|fno-PIC|fno-pie|fno-PIE| \
+  shared|static|nostdlib|nodefaultlibs|nostartfiles:;:-fPIE -pie}"
+#else
+#define PIE_DRIVER_SELF_SPECS ""
+#endif
+
+#ifndef GNU_DRIVER_SELF_SPECS
+#define GNU_DRIVER_SELF_SPECS PIE_DRIVER_SELF_SPECS
+#endif

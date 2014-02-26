@@ -70,3 +70,8 @@ along with GCC; see the file COPYING3.  If not see
 
 /* Static stack checking is supported by means of probes.  */
 #define STACK_CHECK_STATIC_BUILTIN 1
+
+/* Use GNU_DRIVER_SELF_SPECS.  */
+#ifndef DRIVER_SELF_SPECS
+#define DRIVER_SELF_SPECS GNU_DRIVER_SELF_SPECS
+#endif

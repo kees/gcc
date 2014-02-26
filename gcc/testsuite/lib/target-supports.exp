@@ -474,6 +474,11 @@ proc check_profiling_available { test_what } {
 	}
     }
 
+    # Profiling don't work with default -fPIE -pie.
+    if { [check_effective_target_default_pie] } {
+      return 0
+    }
+
     # Support for -p on solaris2 relies on mcrt1.o which comes with the
     # vendor compiler.  We cannot reliably predict the directory where the
     # vendor compiler (and thus mcrt1.o) is installed so we can't
@@ -846,6 +851,14 @@ proc check_effective_target_pie { } {
 	 || [istarget *-*-gnu*] } {
 	return 1;
     }
+    return 0
+}
+
+# Return 1 if -pie, -fPIE are default enable, 0 otherwise.
+
+proc check_effective_target_default_pie { } {
+    global ENABLE_DEFAULT_PIE
+    return [info exists ENABLE_DEFAULT_PIE]
     return 0
 }
 

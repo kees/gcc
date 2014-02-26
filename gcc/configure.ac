@@ -5558,6 +5558,30 @@ if test x"${LINKER_HASH_STYLE}" != x; then
                                          [The linker hash style])
 fi
 
+# Check whether --enable-default-pie was given and target have the support.
+AC_ARG_ENABLE(default-pie,
+[AS_HELP_STRING([--enable-default-pie],
+  [enable Position Independent Executable as default])],
+enable_default_pie=$enableval,
+enable_default_pie=no)
+if test x$enable_default_pie = xyes; then
+  AC_MSG_CHECKING(if $target supports default PIE)
+  enable_default_pie=no
+  case $target in
+    i?86*-*-linux* | x86_64*-*-linux*)
+      enable_default_pie=yes
+      ;;
+    *)
+      ;;
+    esac
+  AC_MSG_RESULT($enable_default_pie)
+fi
+if test x$enable_default_pie == xyes ; then
+  AC_DEFINE(ENABLE_DEFAULT_PIE, 1,
+      [Define if your target supports default PIE and it is enabled.])
+fi
+AC_SUBST(enable_default_pie)
+
 # Configure the subdirectories
 # AC_CONFIG_SUBDIRS($subdirs)
 

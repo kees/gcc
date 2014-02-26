@@ -1,5 +1,6 @@
 // PR c++/34094
 // { dg-do link { target { ! { *-*-darwin* *-*-hpux* *-*-solaris2.* } } } }
+// { dg-skip-if "" { default_pie } { "*" } { "" } }
 // { dg-options "-g" }
 // Ignore additional message on powerpc-ibm-aix
 // { dg-prune-output "obtain more information" } */

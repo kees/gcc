@@ -10308,6 +10308,12 @@ For predictable results, you must also specify the same set of options
 used for compilation (@option{-fpie}, @option{-fPIE},
 or model suboptions) when you specify this linker option.
 
+NOTE: With configure --enable-default-pie this option is enabled by default
+for C, C++, ObjC, ObjC++, if none of @option{-fno-PIE}, @option{-fno-pie},
+@option{-fPIC}, @option{-fpic}, @option{-fno-PIC}, @option{-fno-pic},
+@option{-nostdlib}, @option{-nostartfiles}, @option{-shared},
+@option{-nodefaultlibs}, nor @option{static} are found.
+
 @item -rdynamic
 @opindex rdynamic
 Pass the flag @option{-export-dynamic} to the ELF linker, on targets
@@ -22149,6 +22155,12 @@ used during linking.
 @option{-fpie} and @option{-fPIE} both define the macros
 @code{__pie__} and @code{__PIE__}.  The macros have the value 1
 for @option{-fpie} and 2 for @option{-fPIE}.
+
+NOTE: With configure --enable-default-pie this option is enabled by default
+for C, C++, ObjC, ObjC++, if none of @option{-fno-PIE}, @option{-fno-pie},
+@option{-fPIC}, @option{-fpic}, @option{-fno-PIC}, @option{-fno-pic},
+@option{-nostdlib}, @option{-nostartfiles}, @option{-shared},
+@option{-nodefaultlibs}, nor @option{static} are found.
 
 @item -fno-jump-tables
 @opindex fno-jump-tables

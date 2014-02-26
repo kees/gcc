@@ -963,14 +963,23 @@ CONTEXT_H = context.h
 # cross compiler which does not use the native headers and libraries.
 INTERNAL_CFLAGS = -DIN_GCC $(PICFLAG) @CROSS@
 
+# We don't want to compile the compiler with -fPIE, it makes PCH fail.
+enable_default_pie = @enable_default_pie@
+ifeq ($(enable_default_pie),yes)
+NOPIE_CFLAGS = -fno-PIE
+else
+NOPIE_CFLAGS=
+endif
+
 # This is the variable actually used when we compile. If you change this,
 # you probably want to update BUILD_CFLAGS in configure.ac
-ALL_CFLAGS = $(T_CFLAGS) $(CFLAGS-$@) \
+ALL_CFLAGS = $(NOPIE_CFLAGS) $(T_CFLAGS) $(CFLAGS-$@) \
   $(CFLAGS) $(INTERNAL_CFLAGS) $(COVERAGE_FLAGS) $(WARN_CFLAGS) @DEFS@
 
 # The C++ version.
-ALL_CXXFLAGS = $(T_CFLAGS) $(CFLAGS-$@) $(CXXFLAGS) $(INTERNAL_CFLAGS) \
-  $(COVERAGE_FLAGS) $(NOEXCEPTION_FLAGS) $(WARN_CXXFLAGS) @DEFS@
+ALL_CXXFLAGS = $(NOPIE_CFLAGS) $(T_CFLAGS) $(CFLAGS-$@) $(CXXFLAGS) \
+  $(INTERNAL_CFLAGS) $(COVERAGE_FLAGS) $(NOEXCEPTION_FLAGS) \
+  $(WARN_CXXFLAGS) @DEFS@
 
 # Likewise.  Put INCLUDES at the beginning: this way, if some autoconf macro
 # puts -I options in CPPFLAGS, our include files in the srcdir will always
@@ -1819,6 +1828,7 @@ libgcc.mvars: config.status Makefile specs xgcc$(exeext)
 	echo GCC_CFLAGS = '$(GCC_CFLAGS)' >> tmp-libgcc.mvars
 	echo INHIBIT_LIBC_CFLAGS = '$(INHIBIT_LIBC_CFLAGS)' >> tmp-libgcc.mvars
 	echo TARGET_SYSTEM_ROOT = '$(TARGET_SYSTEM_ROOT)' >> tmp-libgcc.mvars
+	echo enable_default_pie = '$(enable_default_pie)' >> tmp-libgcc.mvars
 
 	mv tmp-libgcc.mvars libgcc.mvars
 
@@ -3481,6 +3491,9 @@ site.exp: ./config.status Makefile
 	fi
 	@if test "@enable_lto@" = "yes" ; then \
 	  echo "set ENABLE_LTO 1" >> ./site.tmp; \
+	fi
+	@if test "@enable_default_pie@" = "yes" ; then \
+	  echo "set ENABLE_DEFAULT_PIE 1" >> ./site.tmp; \
 	fi
 # If newlib has been configured, we need to pass -B to gcc so it can find
 # newlib's crt0.o if it exists.  This will cause a "path prefix not used"

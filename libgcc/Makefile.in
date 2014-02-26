@@ -279,11 +279,17 @@ override CFLAGS := $(filter-out -fprofile-generate -fprofile-use,$(CFLAGS))
 INTERNAL_CFLAGS = $(CFLAGS) $(LIBGCC2_CFLAGS) $(HOST_LIBGCC2_CFLAGS) \
 		  $(INCLUDES) @set_have_cc_tls@ @set_use_emutls@
 
+# Don't use -fPIE when compiling crtbegin/end.
+ifeq ($(enable_default_pie),yes)
+NOPIE_CFLAGS = -fno-PIE
+else
+NOPIE_CFLAGS=
+endif
 # Options to use when compiling crtbegin/end.
 CRTSTUFF_CFLAGS = -O2 $(GCC_CFLAGS) $(INCLUDES) $(MULTILIB_CFLAGS) -g0 \
   -finhibit-size-directive -fno-inline -fno-exceptions \
   -fno-zero-initialized-in-bss -fno-toplevel-reorder -fno-tree-vectorize \
-  -fno-stack-protector \
+  -fno-stack-protector $(NOPIE_CFLAGS) \
   $(INHIBIT_LIBC_CFLAGS)
 
 # Extra flags to use when compiling crt{begin,end}.o.
