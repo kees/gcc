@@ -1420,24 +1420,27 @@ handle_cold_attribute (tree *node, tree name, tree ARG_UNUSED (args),
 /* Add FLAGS for a function NODE to no_sanitize_flags in DECL_ATTRIBUTES.  */
 
 void
-add_no_sanitize_value (tree node, unsigned int flags)
+add_no_sanitize_value (tree node, unsigned long long flags)
 {
+
   tree attr = lookup_attribute ("no_sanitize", DECL_ATTRIBUTES (node));
   if (attr)
     {
-      unsigned int old_value = tree_to_uhwi (TREE_VALUE (attr));
+      unsigned long long old_value = tree_to_uhwi (TREE_VALUE (attr));
       flags |= old_value;
 
       if (flags == old_value)
 	return;
 
-      TREE_VALUE (attr) = build_int_cst (unsigned_type_node, flags);
+      TREE_VALUE (attr) = build_int_cst (long_long_unsigned_type_node, flags);
     }
   else
-    DECL_ATTRIBUTES (node)
-      = tree_cons (get_identifier ("no_sanitize"),
-		   build_int_cst (unsigned_type_node, flags),
-		   DECL_ATTRIBUTES (node));
+    {
+      DECL_ATTRIBUTES (node)
+	= tree_cons (get_identifier ("no_sanitize"),
+		     build_int_cst (long_long_unsigned_type_node, flags),
+		     DECL_ATTRIBUTES (node));
+    }
 }
 
 /* Handle a "no_sanitize" attribute; arguments as in
@@ -1447,7 +1450,7 @@ static tree
 handle_no_sanitize_attribute (tree *node, tree name, tree args, int,
 			      bool *no_add_attrs)
 {
-  unsigned int flags = 0;
+  unsigned long long flags = 0;
   *no_add_attrs = true;
   if (TREE_CODE (*node) != FUNCTION_DECL)
     {

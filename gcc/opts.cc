@@ -2168,9 +2168,9 @@ const struct sanitizer_opts_s sanitizer_opts[] =
   SANITIZER_OPT (pointer-overflow, SANITIZE_POINTER_OVERFLOW, true, true),
   SANITIZER_OPT (builtin, SANITIZE_BUILTIN, true, true),
   SANITIZER_OPT (shadow-call-stack, SANITIZE_SHADOW_CALL_STACK, false, false),
-  SANITIZER_OPT (all, ~0U, true, true),
+  SANITIZER_OPT (all, ~0ULL, true, true),
 #undef SANITIZER_OPT
-  { NULL, 0U, 0UL, false, false }
+  { NULL, 0ULL, 0UL, false, false }
 };
 
 /* -fzero-call-used-regs= suboptions.  */
@@ -2241,7 +2241,7 @@ get_closest_sanitizer_option (const string_fragment &arg,
     {
       /* -fsanitize=all is not valid, so don't offer it.  */
       if (code == OPT_fsanitize_
-	  && opts[i].flag == ~0U
+	  && opts[i].flag == ~0ULL
 	  && value)
 	continue;
 
@@ -2268,9 +2268,9 @@ get_closest_sanitizer_option (const string_fragment &arg,
    adjust previous FLAGS and return new ones.  If COMPLAIN is false,
    don't issue diagnostics.  */
 
-unsigned int
+unsigned long long
 parse_sanitizer_options (const char *p, location_t loc, int scode,
-			 unsigned int flags, int value, bool complain)
+			 unsigned long long flags, int value, bool complain)
 {
   enum opt_code code = (enum opt_code) scode;
 
@@ -2296,7 +2296,7 @@ parse_sanitizer_options (const char *p, location_t loc, int scode,
 	    && memcmp (p, sanitizer_opts[i].name, len) == 0)
 	  {
 	    /* Handle both -fsanitize and -fno-sanitize cases.  */
-	    if (value && sanitizer_opts[i].flag == ~0U)
+	    if (value && sanitizer_opts[i].flag == ~0ULL)
 	      {
 		if (code == OPT_fsanitize_)
 		  {
@@ -2377,10 +2377,10 @@ parse_sanitizer_options (const char *p, location_t loc, int scode,
 /* Parse string values of no_sanitize attribute passed in VALUE.
    Values are separated with comma.  */
 
-unsigned int
+unsigned long long
 parse_no_sanitize_attribute (char *value)
 {
-  unsigned int flags = 0;
+  unsigned long long flags = 0;
   unsigned int i;
   char *q = strtok (value, ",");
 

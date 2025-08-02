@@ -205,7 +205,7 @@ bool flag_opts_finished
 
 ; What the sanitizer should instrument
 Variable
-unsigned int flag_sanitize
+unsigned long long flag_sanitize
 
 ; What sanitizers should recover from errors
 Variable
