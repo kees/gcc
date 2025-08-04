@@ -1665,6 +1665,11 @@ enum class aarch64_tristate_mode : int { NO, YES, MAYBE };
    applied.  */
 #define HARDREG_PRE_REGNOS { FPM_REGNUM, 0 }
 
+/* Intercept all function label output including cold partitions for KCFI preamble emission.  */
+#undef ASM_OUTPUT_FUNCTION_LABEL
+#define ASM_OUTPUT_FUNCTION_LABEL(FILE, NAME, DECL) \
+  aarch64_declare_function_name ((FILE), (NAME), (DECL))
+
 #endif
 
 #endif /* GCC_AARCH64_H */

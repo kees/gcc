@@ -83,6 +83,7 @@
 #include "rtlanal.h"
 #include "tree-dfa.h"
 #include "asan.h"
+#include "kcfi.h"
 #include "aarch64-elf-metadata.h"
 #include "aarch64-feature-deps.h"
 #include "config/arm/aarch-common.h"
@@ -19521,6 +19522,9 @@ aarch64_override_options (void)
 
   aarch64_override_options_internal (&global_options);
 
+  /* Initialize KCFI target hooks for AArch64.  */
+  aarch64_kcfi_init ();
+
   /* Save these options as the default ones in case we push and pop them later
      while processing functions with potential target attributes.  */
   target_option_default_node = target_option_current_node
@@ -25578,9 +25582,13 @@ aarch64_declare_function_name (FILE *stream, const char* name,
 
   aarch64_asm_output_variant_pcs (stream, fndecl, name);
 
+  /* Emit KCFI preamble for non-patchable functions.  */
+  kcfi_emit_preamble_if_needed (stream, fndecl, false, 0, name);
+
   /* Don't forget the type directive for ELF.  */
   ASM_OUTPUT_TYPE_DIRECTIVE (stream, name, "function");
-  ASM_OUTPUT_FUNCTION_LABEL (stream, name, fndecl);
+  /* Output function label directly to avoid recursion with our ASM_OUTPUT_FUNCTION_LABEL macro.  */
+  assemble_function_label_raw (stream, name);
 
   cfun->machine->label_is_assembled = true;
 }
@@ -32810,6 +32818,111 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_DOCUMENTATION_NAME
 #define TARGET_DOCUMENTATION_NAME "AArch64"
+
+
+/* AArch64 doesn't need prefix NOPs (instructions are already 4-byte aligned) */
+static int
+aarch64_kcfi_calculate_prefix_nops (HOST_WIDE_INT prefix_nops ATTRIBUTE_UNUSED)
+{
+  /* AArch64 instructions are 4-byte aligned, no prefix NOPs needed for KCFI preamble.  */
+  return 0;
+}
+
+/* Emit AArch64-specific type ID instruction.  */
+static void
+aarch64_kcfi_emit_type_id_instruction (FILE *file, uint32_t type_id)
+{
+  /* Emit type ID as a 32-bit word.  */
+  fprintf (file, "\t.word 0x%08x\n", type_id);
+}
+
+
+
+/* Generate AArch64 KCFI checked call bundle.  */
+static rtx
+aarch64_kcfi_gen_checked_call (rtx call_insn, rtx target_reg, uint32_t expected_type,
+			       HOST_WIDE_INT prefix_nops)
+{
+  /* For AArch64, we create an RTL bundle that combines the KCFI check
+     with the call instruction in an atomic sequence.  */
+
+  if (!REG_P (target_reg))
+    {
+      /* If not a register, load it into x16.  */
+      rtx temp = gen_rtx_REG (Pmode, 16);
+      emit_move_insn (temp, target_reg);
+      target_reg = temp;
+    }
+
+  /* Generate the bundled KCFI check + call pattern.  */
+  rtx pattern;
+  if (CALL_P (call_insn))
+    {
+      rtx call_pattern = PATTERN (call_insn);
+
+      /* Create labels used by both call and sibcall patterns.  */
+      rtx pass_label = gen_label_rtx ();
+      rtx trap_label = gen_label_rtx ();
+
+      /* Check if it's a sibling call.  */
+      if (find_reg_note (call_insn, REG_NORETURN, NULL_RTX)
+	  || (GET_CODE (call_pattern) == PARALLEL
+	      && GET_CODE (XVECEXP (call_pattern, 0, XVECLEN (call_pattern, 0) - 1)) == RETURN))
+	{
+	  /* Generate sibling call bundle.  */
+	  pattern = gen_aarch64_kcfi_checked_sibcall (target_reg,
+						      gen_int_mode (expected_type, SImode),
+						      gen_int_mode (prefix_nops, SImode),
+						      pass_label,
+						      trap_label);
+	}
+      else
+	{
+	  /* Generate regular call bundle.  */
+	  pattern = gen_aarch64_kcfi_checked_call (target_reg,
+						   gen_int_mode (expected_type, SImode),
+						   gen_int_mode (prefix_nops, SImode),
+						   pass_label,
+						   trap_label);
+	}
+    }
+  else
+    {
+      error ("KCFI: Expected call instruction");
+      return NULL_RTX;
+    }
+
+  return pattern;
+}
+
+/* Add AArch64-specific register clobbers for KCFI calls.  */
+static void
+aarch64_kcfi_add_clobbers (rtx_insn *call_insn)
+{
+  /* AArch64 KCFI uses w16 and w17 (x16 and x17) as scratch registers.  */
+  rtx usage = CALL_INSN_FUNCTION_USAGE (call_insn);
+
+  /* Add w16 (x16) clobber.  */
+  clobber_reg (&usage, gen_rtx_REG (SImode, 16));
+
+  /* Add w17 (x17) clobber.  */
+  clobber_reg (&usage, gen_rtx_REG (SImode, 17));
+
+  CALL_INSN_FUNCTION_USAGE (call_insn) = usage;
+}
+
+/* Initialize AArch64 KCFI target hooks.  */
+void
+aarch64_kcfi_init (void)
+{
+  if (flag_sanitize & SANITIZE_KCFI)
+    {
+      kcfi_target.gen_kcfi_checked_call = aarch64_kcfi_gen_checked_call;
+      kcfi_target.add_kcfi_clobbers = aarch64_kcfi_add_clobbers;
+      kcfi_target.calculate_prefix_nops = aarch64_kcfi_calculate_prefix_nops;
+      kcfi_target.emit_type_id_instruction = aarch64_kcfi_emit_type_id_instruction;
+    }
+}
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
