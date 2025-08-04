@@ -3180,6 +3180,9 @@ void
 ix86_option_override (void)
 {
   ix86_option_override_internal (true, &global_options, &global_options_set);
+
+  /* Initialize KCFI target hooks for x86-64.  */
+  ix86_kcfi_init ();
 }
 
 /* Remember the last target of ix86_set_current_function.  */

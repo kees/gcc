@@ -98,6 +98,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "i386-builtins.h"
 #include "i386-expand.h"
 #include "i386-features.h"
+#include "kcfi.h"
 #include "function-abi.h"
 #include "rtl-error.h"
 #include "gimple-pretty-print.h"
@@ -1700,6 +1701,19 @@ ix86_function_naked (const_tree fn)
   return false;
 }
 
+/* Apply x86-64 specific masking to KCFI type ID.  */
+static uint32_t
+ix86_kcfi_mask_type_id (uint32_t type_id)
+{
+  /* Avoid embedding ENDBR instructions in KCFI type IDs.
+     ENDBR64: 0xfa1e0ff3, ENDBR32: 0xfb1e0ff3
+     If the type ID matches either instruction encoding, increment by 1.  */
+  if (type_id == 0xfa1e0ff3U || type_id == 0xfb1e0ff3U)
+    return type_id + 1;
+
+  return type_id;
+}
+
 /* Write the extra assembler code needed to declare a function properly.  */
 
 void
@@ -1710,6 +1724,9 @@ ix86_asm_output_function_label (FILE *out_file, const char *fname,
 
   if (cfun)
     cfun->machine->function_label_emitted = true;
+
+  /* Handle KCFI preamble for non-patchable functions.  */
+  kcfi_emit_preamble_if_needed (out_file, decl, false, 0, fname);
 
   if (is_ms_hook)
     {
@@ -28453,6 +28470,117 @@ ix86_set_handled_components (sbitmap components)
 	cfun->machine->use_fast_prologue_epilogue = true;
 	cfun->machine->frame.save_regs_using_mov = true;
       }
+}
+
+/* Generate KCFI checked call - replaces indirect call with bundled KCFI check + call.  */
+static rtx
+ix86_kcfi_gen_checked_call (rtx call_insn, rtx target_reg, uint32_t type_id, HOST_WIDE_INT prefix_nops)
+{
+  rtx inverse_type_id_rtx, offset_rtx, pass_label, trap_label, call_args;
+  bool is_sibcall = false;
+
+  /* Check if this is a sibling call (tail call) */
+  if (CALL_P (call_insn))
+    is_sibcall = SIBLING_CALL_P (call_insn);
+
+  /* Convert type ID to inverse for the check (0 - hash) */
+  uint32_t inverse_type_id = (uint32_t)(0 - type_id);
+  inverse_type_id_rtx = gen_int_mode (inverse_type_id, SImode);
+
+  /* Calculate variable offset: -(4 + prefix_nops) */
+  HOST_WIDE_INT offset = -(4 + prefix_nops);
+  offset_rtx = gen_int_mode (offset, DImode);
+
+  /* Generate unique labels for this check.  */
+  pass_label = gen_label_rtx ();
+  trap_label = gen_label_rtx ();
+
+  /* Extract call arguments from original call insn.  */
+  rtx pattern = PATTERN (call_insn);
+  if (GET_CODE (pattern) == CALL)
+    call_args = XEXP (pattern, 1);
+  else if (GET_CODE (pattern) == SET && GET_CODE (SET_SRC (pattern)) == CALL)
+    call_args = XEXP (SET_SRC (pattern), 1);
+  else if (GET_CODE (pattern) == PARALLEL)
+    {
+      /* Handle PARALLEL patterns (includes peephole2 optimizations and other legitimate cases) */
+      is_sibcall = true;  /* PARALLEL indicates a sibling call.  */
+      rtx first_elem = XVECEXP (pattern, 0, 0);
+      if (GET_CODE (first_elem) == CALL)
+	{
+	  call_args = XEXP (first_elem, 1);
+	}
+      else if (GET_CODE (first_elem) == SET && GET_CODE (SET_SRC (first_elem)) == CALL)
+	{
+	  call_args = XEXP (SET_SRC (first_elem), 1);
+	}
+      else
+	{
+	  error ("KCFI: Unexpected PARALLEL pattern structure");
+	  gcc_unreachable ();
+	}
+    }
+  else
+    {
+      /* This should never happen - all indirect calls should match one of the above patterns.  */
+      error ("KCFI: Unexpected call pattern structure");
+      gcc_unreachable ();
+    }
+
+  rtx bundled_call;
+  if (is_sibcall)
+    {
+      /* Use sibling call pattern for tail calls.  */
+      bundled_call = gen_kcfi_checked_sibcall (target_reg, call_args, inverse_type_id_rtx, offset_rtx, pass_label, trap_label);
+    }
+  else
+    {
+      /* Use regular call pattern.  */
+      bundled_call = gen_kcfi_checked_call (target_reg, call_args, inverse_type_id_rtx, offset_rtx, pass_label, trap_label);
+    }
+
+  return bundled_call;
+}
+
+/* Calculate x86_64-specific KCFI prefix NOPs for 16-byte alignment.  */
+static int
+ix86_kcfi_calculate_prefix_nops (HOST_WIDE_INT prefix_nops)
+{
+  /* Calculate KCFI NOPs needed: aligned(prefix_nops + 5, 16).  */
+  return (16 - ((prefix_nops + 5) % 16)) % 16;
+}
+
+/* Emit x86_64-specific type ID instruction.  */
+static void
+ix86_kcfi_emit_type_id_instruction (FILE *file, uint32_t type_id)
+{
+  /* Emit movl instruction with type ID.  */
+  fprintf (file, "\tmovl\t$0x%08x, %%eax\n", type_id);
+}
+
+/* Add x86-64 specific register clobbers for KCFI calls.  */
+static void
+ix86_kcfi_add_clobbers (rtx_insn *call_insn)
+{
+  /* Add r10/r11 clobbers so register allocator knows they'll be used.  */
+  rtx usage = CALL_INSN_FUNCTION_USAGE (call_insn);
+  clobber_reg (&usage, gen_rtx_REG (DImode, R10_REG));
+  clobber_reg (&usage, gen_rtx_REG (DImode, R11_REG));
+  CALL_INSN_FUNCTION_USAGE (call_insn) = usage;
+}
+
+/* Initialize x86-64 KCFI target hooks.  */
+void
+ix86_kcfi_init (void)
+{
+  if (TARGET_64BIT && (flag_sanitize & SANITIZE_KCFI))
+    {
+      kcfi_target.mask_type_id = ix86_kcfi_mask_type_id;
+      kcfi_target.gen_kcfi_checked_call = ix86_kcfi_gen_checked_call;
+      kcfi_target.add_kcfi_clobbers = ix86_kcfi_add_clobbers;
+      kcfi_target.calculate_prefix_nops = ix86_kcfi_calculate_prefix_nops;
+      kcfi_target.emit_type_id_instruction = ix86_kcfi_emit_type_id_instruction;
+    }
 }
 
 #undef TARGET_SHRINK_WRAP_GET_SEPARATE_COMPONENTS

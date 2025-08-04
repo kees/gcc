@@ -36,6 +36,10 @@ extern void ix86_maybe_emit_epilogue_vzeroupper (void);
 extern void ix86_expand_epilogue (int);
 extern void ix86_expand_split_stack_prologue (void);
 
+/* KCFI support.  */
+extern void ix86_kcfi_init (void);
+extern void kcfi_emit_trap_with_section (FILE *file, rtx trap_label_rtx);
+
 extern void ix86_output_addr_vec_elt (FILE *, int);
 extern void ix86_output_addr_diff_elt (FILE *, int, int);
 
