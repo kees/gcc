@@ -417,6 +417,7 @@
     UNSPECV_TCANCEL		; Represent transaction cancel.
     UNSPEC_RNDR			; Represent RNDR
     UNSPEC_RNDRRS		; Represent RNDRRS
+    UNSPECV_KCFI_CHECK		; Represent KCFI check bundled with call
   ]
 )
 
@@ -1315,6 +1316,142 @@
   ""
   "brk #1000"
   [(set_attr "type" "trap")])
+
+;; KCFI bundled check and call patterns
+;; These combine the KCFI check with the call in an atomic sequence
+
+(define_insn "aarch64_kcfi_checked_call"
+  [(parallel [(call (mem:DI (match_operand:DI 0 "register_operand" "r"))
+                    (const_int 0))
+              (unspec:DI [(const_int 0)] UNSPEC_CALLEE_ABI)
+              (unspec_volatile:DI [(match_operand:SI 1 "const_int_operand" "n")  ; type_id
+                                   (match_operand:SI 2 "const_int_operand" "n")  ; prefix_nops
+                                   (label_ref (match_operand 3))  ; pass label
+                                   (label_ref (match_operand 4))] ; trap label
+                                  UNSPECV_KCFI_CHECK)
+              (clobber (reg:DI LR_REGNUM))
+              (clobber (reg:SI 16))  ; w16 - scratch for loaded type
+              (clobber (reg:SI 17))])] ; w17 - scratch for expected type
+  "flag_sanitize & SANITIZE_KCFI"
+  "*
+  {
+    uint32_t type_id = INTVAL (operands[1]);
+    HOST_WIDE_INT prefix_nops = INTVAL (operands[2]);
+    HOST_WIDE_INT offset = -(4 + prefix_nops);
+
+    /* AArch64 KCFI check sequence:
+       1. Load actual type from function preamble
+       2. Load expected type
+       3. Compare and branch if equal
+       4. Trap if mismatch
+       5. Call target.  */
+
+    static char ldur_buffer[64];
+    sprintf (ldur_buffer, \"ldur\\tw16, [%%0, #%ld]\", offset);
+    output_asm_insn (ldur_buffer, operands);
+
+    /* Load expected type - may need multiple instructions for large constants.  */
+    if ((type_id & 0xffff0000) == 0)
+      {
+        static char mov_buffer[64];
+        sprintf (mov_buffer, \"mov\\tw17, #%u\", type_id);
+        output_asm_insn (mov_buffer, operands);
+      }
+    else
+      {
+        static char mov_buffer[64], movk_buffer[64];
+        sprintf (mov_buffer, \"mov\\tw17, #%u\", type_id & 0xffff);
+        output_asm_insn (mov_buffer, operands);
+        sprintf (movk_buffer, \"movk\\tw17, #%u, lsl #16\", (type_id >> 16) & 0xffff);
+        output_asm_insn (movk_buffer, operands);
+      }
+
+    output_asm_insn (\"cmp\\tw16, w17\", operands);
+    output_asm_insn (\"b.eq\\t%l3\", operands);
+
+    /* Generate unique trap ID and emit trap.  */
+    output_asm_insn (\"%l4:\", operands);
+
+    /* Calculate and emit BRK with ESR encoding.  */
+    unsigned type_index = 17;  /* w17 contains expected type.  */
+    unsigned addr_index = REGNO (operands[0]) - R0_REGNUM;
+    unsigned esr_value = 0x8000 | ((type_index & 31) << 5) | (addr_index & 31);
+
+    static char brk_buffer[32];
+    sprintf (brk_buffer, \"brk\\t#%u\", esr_value);
+    output_asm_insn (brk_buffer, operands);
+
+    output_asm_insn (\"%l3:\", operands);
+    output_asm_insn (\"\\tblr\\t%0\", operands);
+
+    return \"\";
+  }"
+  [(set_attr "type" "call")
+   (set_attr "length" "24")])
+
+(define_insn "aarch64_kcfi_checked_sibcall"
+  [(parallel [(call (mem:DI (match_operand:DI 0 "register_operand" "r"))
+                    (const_int 0))
+              (unspec:DI [(const_int 0)] UNSPEC_CALLEE_ABI)
+              (unspec_volatile:DI [(match_operand:SI 1 "const_int_operand" "n")  ; type_id
+                                   (match_operand:SI 2 "const_int_operand" "n")  ; prefix_nops
+                                   (label_ref (match_operand 3))  ; pass label
+                                   (label_ref (match_operand 4))] ; trap label
+                                  UNSPECV_KCFI_CHECK)
+              (return)
+              (clobber (reg:SI 16))  ; w16 - scratch for loaded type
+              (clobber (reg:SI 17))])] ; w17 - scratch for expected type
+  "flag_sanitize & SANITIZE_KCFI"
+  "*
+  {
+    uint32_t type_id = INTVAL (operands[1]);
+    HOST_WIDE_INT prefix_nops = INTVAL (operands[2]);
+    HOST_WIDE_INT offset = -(4 + prefix_nops);
+
+    /* AArch64 KCFI check sequence for sibling calls.  */
+
+    static char ldur_buffer[64];
+    sprintf (ldur_buffer, \"ldur\\tw16, [%%0, #%ld]\", offset);
+    output_asm_insn (ldur_buffer, operands);
+
+    /* Load expected type.  */
+    if ((type_id & 0xffff0000) == 0)
+      {
+        static char mov_buffer[64];
+        sprintf (mov_buffer, \"mov\\tw17, #%u\", type_id);
+        output_asm_insn (mov_buffer, operands);
+      }
+    else
+      {
+        static char mov_buffer[64], movk_buffer[64];
+        sprintf (mov_buffer, \"mov\\tw17, #%u\", type_id & 0xffff);
+        output_asm_insn (mov_buffer, operands);
+        sprintf (movk_buffer, \"movk\\tw17, #%u, lsl #16\", (type_id >> 16) & 0xffff);
+        output_asm_insn (movk_buffer, operands);
+      }
+
+    output_asm_insn (\"cmp\\tw16, w17\", operands);
+    output_asm_insn (\"b.eq\\t%l3\", operands);
+
+    /* Generate unique trap ID and emit trap.  */
+    output_asm_insn (\"%l4:\", operands);
+
+    /* Calculate and emit BRK with ESR encoding.  */
+    unsigned type_index = 17;  /* w17 contains expected type.  */
+    unsigned addr_index = REGNO (operands[0]) - R0_REGNUM;
+    unsigned esr_value = 0x8000 | ((type_index & 31) << 5) | (addr_index & 31);
+
+    static char brk_buffer[32];
+    sprintf (brk_buffer, \"brk\\t#%u\", esr_value);
+    output_asm_insn (brk_buffer, operands);
+
+    output_asm_insn (\"%l3:\", operands);
+    output_asm_insn (\"\\tbr\\t%0\", operands);
+
+    return \"\";
+  }"
+  [(set_attr "type" "branch")
+   (set_attr "length" "24")])
 
 (define_expand "prologue"
   [(clobber (const_int 0))]

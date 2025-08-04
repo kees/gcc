@@ -1285,4 +1285,8 @@ extern unsigned aarch64_stack_alignment (const_tree exp, unsigned align);
 extern rtx aarch64_gen_compare_zero_and_branch (rtx_code code, rtx x,
 						rtx_code_label *label);
 
+/* KCFI support.  */
+extern void aarch64_kcfi_init (void);
+extern void kcfi_emit_trap_with_section (FILE *file, rtx trap_label_rtx);
+
 #endif /* GCC_AARCH64_PROTOS_H */
