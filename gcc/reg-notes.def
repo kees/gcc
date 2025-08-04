@@ -251,5 +251,14 @@ REG_NOTE (UNTYPED_CALL)
    compiler when the option -fcf-protection=branch is specified.  */
 REG_NOTE (CALL_NOCF_CHECK)
 
+/* Contains the expected KCFI type ID for an indirect call instruction.
+   This note carries the 32-bit type identifier that should match the
+   type ID stored in the function preamble.  Used by KCFI (Kernel Control
+   Flow Integrity) to validate indirect call targets at runtime.  */
+REG_NOTE (CALL_KCFI_TYPE)
+
+/* Marks a jump instruction that should be skipped by DWARF control flow analysis.  */
+REG_NOTE (KCFI_DWARF_SKIP)
+
 /* The values passed to callee, for debuginfo purposes.  */
 REG_NOTE (CALL_ARG_LOCATION)

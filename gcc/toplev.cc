@@ -67,6 +67,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "asan.h"
 #include "tsan.h"
+#include "kcfi.h"
 #include "plugin.h"
 #include "context.h"
 #include "pass_manager.h"
@@ -523,6 +524,7 @@ compile_file (void)
 	 Some target ports emit PIC setup thunks here.  */
       insn_locations_init ();
       targetm.asm_out.code_end ();
+
 
       /* Do dbx symbols.  */
       timevar_push (TV_SYMOUT);
@@ -1737,6 +1739,12 @@ process_options ()
       else if (flag_exceptions)
 	error_at (UNKNOWN_LOCATION, "%<-fsanitize=shadow-call-stack%> "
 		  "requires %<-fno-exceptions%>");
+    }
+
+  if (flag_sanitize & SANITIZE_KCFI)
+    {
+      if (!kcfi_target.gen_kcfi_checked_call)
+	sorry ("%<-fsanitize=kcfi%> not supported by this target");
     }
 
   HOST_WIDE_INT patch_area_size, patch_area_start;

@@ -275,6 +275,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_sink_code, false /* unsplit edges */);
       NEXT_PASS (pass_sancov);
       NEXT_PASS (pass_asan);
+      NEXT_PASS (pass_kcfi);
       NEXT_PASS (pass_tsan);
       NEXT_PASS (pass_dse, true /* use DR analysis */);
       NEXT_PASS (pass_dce, false /* update_address_taken_p */, false /* remove_unused_locals */);
@@ -443,6 +444,7 @@ along with GCC; see the file COPYING3.  If not see
   NEXT_PASS (pass_sancov_O0);
   NEXT_PASS (pass_lower_switch_O0);
   NEXT_PASS (pass_asan_O0);
+  NEXT_PASS (pass_kcfi_O0);
   NEXT_PASS (pass_tsan_O0);
   NEXT_PASS (pass_musttail);
   NEXT_PASS (pass_sanopt);
@@ -563,6 +565,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_delay_slots);
 	  NEXT_PASS (pass_split_for_shorten_branches);
 	  NEXT_PASS (pass_convert_to_eh_region_ranges);
+	  NEXT_PASS (pass_kcfi_final_instrumentation);
 	  NEXT_PASS (pass_shorten_branches);
 	  NEXT_PASS (pass_set_nothrow_function_flags);
 	  NEXT_PASS (pass_dwarf2_frame);

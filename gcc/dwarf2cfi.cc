@@ -2677,6 +2677,11 @@ create_trace_edges (rtx_insn *insn)
 	}
       else if (returnjump_p (insn))
 	;
+      else if (find_reg_note (insn, REG_KCFI_DWARF_SKIP, NULL_RTX))
+	{
+	  /* KCFI check jumps are internal control flow within the check sequence
+	     and don't need DWARF CFI trace edge processing.  */
+	}
       else if ((tmp = extract_asm_operands (PATTERN (insn))) != NULL)
 	{
 	  n = ASM_OPERANDS_LABEL_LENGTH (tmp);
