@@ -1720,6 +1720,7 @@ OBJS = \
 	asan.o \
 	tsan.o \
 	ubsan.o \
+	kcfi.o \
 	sanopt.o \
 	sancov.o \
 	simple-diagnostic-path.o \

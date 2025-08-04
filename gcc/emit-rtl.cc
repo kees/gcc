@@ -4056,6 +4056,7 @@ try_split (rtx pat, rtx_insn *trial, int last)
 	case REG_SETJMP:
 	case REG_TM:
 	case REG_CALL_NOCF_CHECK:
+	case REG_CALL_KCFI_TYPE:
 	case REG_CALL_ARG_LOCATION:
 	  for (insn = insn_last; insn != NULL_RTX; insn = PREV_INSN (insn))
 	    {

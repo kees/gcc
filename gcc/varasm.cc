@@ -57,6 +57,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "asan.h"
 #include "rtl-iter.h"
+#include "kcfi.h"
 #include "file-prefix-map.h" /* remap_debug_filename()  */
 #include "alloc-pool.h"
 #include "toplev.h"
@@ -2212,6 +2213,10 @@ assemble_start_function (tree decl, const char *fnname)
   ASM_OUTPUT_FUNCTION_LABEL (asm_out_file, fnname, current_function_decl);
 #endif /* ASM_DECLARE_FUNCTION_NAME */
 
+  /* KCFI type ID symbols are only emitted for external function declarations,
+     handled by assemble_external_real().  Function definitions do not emit
+     __kcfi_typeid symbols.  */
+
   /* And the area after the label.  Record it if we haven't done so yet.  */
   if (patch_area_size > patch_area_entry)
     targetm.asm_out.print_patchable_function_entry (asm_out_file,
@@ -2767,6 +2772,19 @@ assemble_external_real (tree decl)
       /* Some systems do require some output.  */
       SYMBOL_REF_USED (XEXP (rtl, 0)) = 1;
       ASM_OUTPUT_EXTERNAL (asm_out_file, decl, XSTR (XEXP (rtl, 0), 0));
+
+      /* Emit KCFI type ID symbol for external function declarations that are address-taken.  */
+      struct cgraph_node *node = (TREE_CODE (decl) == FUNCTION_DECL) ? cgraph_node::get (decl) : NULL;
+      if (flag_sanitize & SANITIZE_KCFI
+	  && TREE_CODE (decl) == FUNCTION_DECL
+	  && !DECL_INITIAL (decl)  /* Only for external declarations (no function body) */
+	  && node && node->address_taken)  /* Use direct cgraph analysis for address-taken check.  */
+	{
+	  const char *name = XSTR (XEXP (rtl, 0), 0);
+	  /* Strip any encoding prefixes like '*' from symbol name.  */
+	  name = targetm.strip_name_encoding (name);
+	  emit_kcfi_typeid_symbol (asm_out_file, decl, name);
+	}
     }
 }
 #endif

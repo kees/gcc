@@ -77,6 +77,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "calls.h"
 #include "expr.h"
 #include "output.h"
+#include "kcfi.h"
 #include "common/common-target.h"
 #include "reload.h"
 #include "intl.h"
@@ -2203,7 +2204,11 @@ default_compare_by_pieces_branch_ratio (machine_mode)
    the location of the NOPs will be recorded in a special object section
    called "__patchable_function_entries".  This routine may be called
    twice per function to put NOPs before and after the function
-   entry.  */
+   entry.
+
+   KCFI Integration: When KCFI is enabled and this is prefix emission (record_p = true),
+   this function will emit the KCFI preamble (symbols, NOPs, movl) before the prefix NOPs
+   to ensure correct memory layout per KCFI specification.  */
 
 void
 default_print_patchable_function_entry (FILE *file,
@@ -2219,6 +2224,42 @@ default_print_patchable_function_entry (FILE *file,
   code_num = recog_memoized (my_nop);
   nop_templ = get_insn_template (code_num, my_nop);
 
+  /* KCFI Integration for prefix emission.  */
+  bool kcfi_handled = false;
+  if (record_p && current_function_decl)
+    {
+      /* Parse patchable function entry configuration to get prefix NOPs.  */
+      HOST_WIDE_INT total_nops = patch_area_size;
+      HOST_WIDE_INT prefix_nops = 0;
+
+      /* Check for function-specific patchable_function_entry attribute.  */
+      tree patchable_attr = lookup_attribute ("patchable_function_entry",
+					     DECL_ATTRIBUTES (current_function_decl));
+      if (patchable_attr)
+	{
+	  tree pp_val = TREE_VALUE (patchable_attr);
+	  total_nops = tree_to_uhwi (TREE_VALUE (pp_val));
+	  if (TREE_CHAIN (pp_val))
+	    prefix_nops = tree_to_uhwi (TREE_VALUE (TREE_CHAIN (pp_val)));
+	}
+      else
+	{
+	  /* Use global configuration if no function-specific attribute.  */
+	  HOST_WIDE_INT patch_area_entry;
+	  parse_and_check_patch_area (flag_patchable_function_entry, false,
+				      &total_nops, &patch_area_entry);
+	  prefix_nops = patch_area_entry;
+	}
+
+      /* Use centralized KCFI manager for patchable context.  */
+      if (prefix_nops > 0 && patch_area_size == (unsigned HOST_WIDE_INT)prefix_nops)
+	{
+	  kcfi_emit_preamble_if_needed (file, current_function_decl, true, prefix_nops, NULL);
+	  kcfi_handled = true;
+	}
+    }
+
+  /* Standard patchable function entry handling.  */
   if (record_p && targetm_common.have_named_sections)
     {
       char buf[256];
@@ -2249,9 +2290,16 @@ default_print_patchable_function_entry (FILE *file,
       ASM_OUTPUT_LABEL (file, buf);
     }
 
+  /* Emit the patchable NOPs.  */
   unsigned i;
   for (i = 0; i < patch_area_size; ++i)
     output_asm_insn (nop_templ, NULL);
+
+  /* Mark that KCFI preamble was handled to prevent duplication in ix86_asm_output_function_label.  */
+  if (kcfi_handled)
+    {
+      mark_kcfi_preamble_emitted ();
+    }
 }
 
 bool

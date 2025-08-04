@@ -1238,6 +1238,26 @@ old_insns_match_p (int mode ATTRIBUTE_UNUSED, rtx_insn *i1, rtx_insn *i2)
   if (RTX_FRAME_RELATED_P (i1) && !insns_have_identical_cfa_notes (i1, i2))
     return dir_none;
 
+  /* KCFI (Kernel Control Flow Integrity): Do not cross-jump between different
+     KCFI check patterns.  Each bundled KCFI call has a unique type ID that must
+     be preserved to prevent type confusion attacks.  */
+  if (CALL_P (i1) && CALL_P (i2))
+    {
+      rtx kcfi_note1 = find_reg_note (i1, REG_CALL_KCFI_TYPE, NULL_RTX);
+      rtx kcfi_note2 = find_reg_note (i2, REG_CALL_KCFI_TYPE, NULL_RTX);
+
+      if (kcfi_note1 || kcfi_note2)
+	{
+	  /* If only one has KCFI note, they're different.  */
+	  if (!kcfi_note1 || !kcfi_note2)
+	    return dir_none;
+
+	  /* If both have KCFI notes, compare the type IDs.  */
+	  if (!rtx_equal_p (XEXP (kcfi_note1, 0), XEXP (kcfi_note2, 0)))
+	    return dir_none;
+	}
+    }
+
 #ifdef STACK_REGS
   /* If cross_jump_death_matters is not 0, the insn's mode
      indicates whether or not the insn contains any stack-like

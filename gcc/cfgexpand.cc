@@ -76,6 +76,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "opts.h"
 #include "gimple-range.h"
 #include "rtl-iter.h"
+#include "kcfi.h"
 
 /* Some systems use __main in a way incompatible with its use in gcc, in these
    cases use the macros NAME__MAIN to give a quoted symbol and SYMBOL__MAIN to
@@ -780,7 +781,7 @@ vars_ssa_cache::operator() (tree name)
       create (use);
 
       gimple *g = SSA_NAME_DEF_STMT (use);
- 
+
       /* CONSTRUCTOR here is always a vector initialization,
 	 walk each element too. */
       if (gimple_assign_single_p (g)
@@ -3202,6 +3203,66 @@ expand_call_stmt (gcall *stmt)
     expand_assignment (lhs, exp, false);
   else
     expand_expr (exp, const0_rtx, VOIDmode, EXPAND_NORMAL);
+
+  /* Add KCFI annotations if this is an indirect call with KCFI wrapper type.  */
+  if (sanitize_flags_p (SANITIZE_KCFI) && !gimple_call_fndecl (stmt))
+    {
+      tree fn_type = gimple_call_fntype (stmt);
+      gcc_assert (fn_type);
+      tree attr = lookup_attribute ("kcfi_type_id", TYPE_ATTRIBUTES (fn_type));
+      if (attr && TREE_VALUE (attr))
+	{
+	  /* Check if this call site originated from a no_sanitize("kcfi") function
+	     during inlining. If so, skip KCFI instrumentation in RTL phase too.  */
+	  bool should_skip_kcfi = false;
+	  location_t call_location = gimple_location (stmt);
+	  gcc_assert (call_location != UNKNOWN_LOCATION);
+
+	  tree block = gimple_block (stmt);
+	  while (block && TREE_CODE (block) == BLOCK)
+	    {
+	      tree fn_decl = BLOCK_ABSTRACT_ORIGIN (block);
+	      if (fn_decl && TREE_CODE (fn_decl) == FUNCTION_DECL)
+		{
+		  /* Found an inlined function - check if it has no_sanitize("kcfi").  */
+		  if (!sanitize_flags_p (SANITIZE_KCFI, fn_decl))
+		    {
+		      should_skip_kcfi = true;
+		      break;
+		    }
+		  break;
+		}
+	      /* Move up the block chain to find parent inlined functions.  */
+	      block = BLOCK_SUPERCONTEXT (block);
+	    }
+
+	  if (!should_skip_kcfi)
+	    {
+	      uint32_t kcfi_type_id = (uint32_t) tree_to_uhwi (TREE_VALUE (attr));
+
+	      /* Find the call that has been created.  */
+	      rtx_insn *call_insn = get_last_insn ();
+	      while (call_insn && call_insn != before_call && !CALL_P (call_insn))
+		call_insn = PREV_INSN (call_insn);
+
+	      if (call_insn && call_insn != before_call && CALL_P (call_insn))
+		{
+		  /* Add KCFI type ID note for anti-merging protection.  */
+		  add_kcfi_type_note (call_insn, kcfi_type_id);
+
+		  /* Add architecture-specific clobbers so register allocator knows
+		     they'll be used.  */
+		  if (kcfi_target.add_kcfi_clobbers)
+		    kcfi_target.add_kcfi_clobbers (call_insn);
+		}
+	      else
+		{
+		  error ("KCFI: Could not find call instruction for wrapper type");
+		  gcc_unreachable ();
+		}
+	    }
+	}
+    }
 
   /* If the gimple call is an indirect call and has 'nocf_check'
      attribute find a generated CALL insn to mark it as no
