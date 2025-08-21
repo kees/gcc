@@ -83,6 +83,7 @@
 #include "rtlanal.h"
 #include "tree-dfa.h"
 #include "asan.h"
+#include "kcfi.h"
 #include "aarch64-elf-metadata.h"
 #include "aarch64-feature-deps.h"
 #include "config/arm/aarch-common.h"
@@ -11848,6 +11849,15 @@ aarch64_expand_call (rtx result, rtx mem, rtx cookie, bool sibcall)
 
   call = gen_rtx_CALL (VOIDmode, mem, const0_rtx);
 
+  /* Only indirect calls need KCFI instrumentation.  */
+  bool is_direct_call = SYMBOL_REF_P (XEXP (mem, 0));
+  rtx kcfi_type_rtx = is_direct_call ? NULL_RTX : kcfi_get_call_type_id ();
+  if (kcfi_type_rtx)
+    {
+      /* Wrap call in KCFI.  */
+      call = gen_rtx_KCFI (VOIDmode, call, kcfi_type_rtx);
+    }
+
   if (result != NULL_RTX)
     call = gen_rtx_SET (result, call);
 
@@ -11863,6 +11873,16 @@ aarch64_expand_call (rtx result, rtx mem, rtx cookie, bool sibcall)
   call = gen_rtx_PARALLEL (VOIDmode, vec);
 
   auto call_insn = aarch64_emit_call_insn (call);
+
+  /* Add KCFI clobbers for indirect calls.  */
+  if (kcfi_type_rtx)
+    {
+      rtx usage = CALL_INSN_FUNCTION_USAGE (call_insn);
+      /* Add X16 and X17 clobbers for AArch64 KCFI scratch registers.  */
+      clobber_reg (&usage, gen_rtx_REG (DImode, 16));
+      clobber_reg (&usage, gen_rtx_REG (DImode, 17));
+      CALL_INSN_FUNCTION_USAGE (call_insn) = usage;
+    }
 
   /* Check whether the call requires a change to PSTATE.SM.  We can't
      emit the instructions to change PSTATE.SM yet, since they involve
@@ -30630,6 +30650,14 @@ aarch64_indirect_call_asm (rtx addr)
   return "";
 }
 
+const char *
+aarch64_indirect_branch_asm (rtx addr)
+{
+  gcc_assert (REG_P (addr));
+  output_asm_insn ("br\t%0", &addr);
+  return aarch64_sls_barrier (aarch64_harden_sls_retbr_p ());
+}
+
 /* Emit the assembly instruction to load the thread pointer into DEST.
    Select between different tpidr_elN registers depending on -mtp= setting.  */
 
@@ -32822,6 +32850,93 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_DOCUMENTATION_NAME
 #define TARGET_DOCUMENTATION_NAME "AArch64"
+
+/* Output the assembly for a KCFI checked call instruction.  */
+const char *
+aarch64_output_kcfi_insn (rtx_insn *insn, rtx *operands)
+{
+  /* Target register is operands[0].  */
+  rtx target_reg = operands[0];
+  gcc_assert (REG_P (target_reg));
+
+  /* Get KCFI type ID from operand[3].  */
+  uint32_t type_id = (uint32_t) INTVAL (operands[3]);
+
+  /* Calculate typeid offset from call target.  */
+  HOST_WIDE_INT offset = -(4 + kcfi_patchable_entry_prefix_nops);
+
+  /* Generate labels internally.  */
+  rtx trap_label = gen_label_rtx ();
+  rtx call_label = gen_label_rtx ();
+
+  /* Get label numbers for custom naming.  */
+  int trap_labelno = CODE_LABEL_NUMBER (trap_label);
+  int call_labelno = CODE_LABEL_NUMBER (call_label);
+
+  /* Generate custom label names.  */
+  char trap_name[32];
+  char call_name[32];
+  ASM_GENERATE_INTERNAL_LABEL (trap_name, "Lkcfi_trap", trap_labelno);
+  ASM_GENERATE_INTERNAL_LABEL (call_name, "Lkcfi_call", call_labelno);
+
+  /* AArch64 KCFI check sequence:
+     1. Load actual type from function preamble
+     2. Load expected type
+     3. Compare and branch if equal
+     4. Trap if mismatch
+     5. Call/branch to target.  */
+
+  rtx temp_operands[3];
+
+  /* Load actual type from memory at offset using ldur.  */
+  temp_operands[0] = gen_rtx_REG (SImode, R16_REGNUM);  /* w16 */
+  temp_operands[1] = target_reg;  /* x register */
+  temp_operands[2] = GEN_INT (offset);  /* offset */
+  output_asm_insn ("ldur\t%w0, [%1, #%2]", temp_operands);
+
+  /* Load expected type low 16 bits into w17.  */
+  temp_operands[0] = gen_rtx_REG (SImode, R17_REGNUM);  /* w17 */
+  temp_operands[1] = GEN_INT (type_id & 0xFFFF);
+  output_asm_insn ("mov\t%w0, #%1", temp_operands);
+
+  /* Load expected type high 16 bits into w17.  */
+  temp_operands[0] = gen_rtx_REG (SImode, R17_REGNUM);  /* w17 */
+  temp_operands[1] = GEN_INT ((type_id >> 16) & 0xFFFF);
+  output_asm_insn ("movk\t%w0, #%1, lsl #16", temp_operands);
+
+  /* Compare types.  */
+  temp_operands[0] = gen_rtx_REG (SImode, R16_REGNUM);  /* w16 */
+  temp_operands[1] = gen_rtx_REG (SImode, R17_REGNUM);  /* w17 */
+  output_asm_insn ("cmp\t%w0, %w1", temp_operands);
+
+  /* Output conditional branch to call label.  */
+  fputs ("\tb.eq\t", asm_out_file);
+  assemble_name (asm_out_file, call_name);
+  fputc ('\n', asm_out_file);
+
+  /* Output trap label and BRK instruction.  */
+  ASM_OUTPUT_LABEL (asm_out_file, trap_name);
+
+  /* Calculate and emit BRK with ESR encoding.  */
+  unsigned type_index = 17;  /* w17 contains expected type.  */
+  unsigned addr_index = REGNO (operands[0]) - R0_REGNUM;
+  unsigned esr_value = 0x8000 | ((type_index & 31) << 5) | (addr_index & 31);
+
+  temp_operands[0] = GEN_INT (esr_value);
+  output_asm_insn ("brk\t#%0", temp_operands);
+
+  /* Output call label.  */
+  ASM_OUTPUT_LABEL (asm_out_file, call_name);
+
+  /* Return appropriate call instruction based on SIBLING_CALL_P.  */
+  if (SIBLING_CALL_P (insn))
+    return aarch64_indirect_branch_asm (operands[0]);
+  else
+    return aarch64_indirect_call_asm (operands[0]);
+}
+
+#undef TARGET_KCFI_SUPPORTED
+#define TARGET_KCFI_SUPPORTED hook_bool_void_true
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
