@@ -81,6 +81,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "cgraph.h"
 #include "langhooks.h"
 #include "gimplify.h"
+#include "kcfi.h"
 
 /* This file should be included last.  */
 #include "target-def.h"
@@ -11346,6 +11347,149 @@ riscv_convert_vector_chunks (struct gcc_options *opts)
     return 1;
 }
 
+/* Apply KCFI wrapping to call pattern if needed.  */
+rtx
+riscv_maybe_wrap_call_with_kcfi (rtx pat, rtx addr)
+{
+  /* Only indirect calls need KCFI instrumentation.  */
+  bool is_direct_call = SYMBOL_REF_P (addr);
+  if (!is_direct_call)
+    {
+      rtx kcfi_type_rtx = kcfi_get_call_type_id ();
+      if (kcfi_type_rtx)
+	{
+	  /* Extract the CALL from the PARALLEL and wrap it with KCFI */
+	  rtx call_rtx = XVECEXP (pat, 0, 0);
+	  rtx kcfi_call = gen_rtx_KCFI (VOIDmode, call_rtx, kcfi_type_rtx);
+
+	  /* Replace the CALL in the PARALLEL with the KCFI-wrapped call */
+	  XVECEXP (pat, 0, 0) = kcfi_call;
+	}
+    }
+  return pat;
+}
+
+/* Apply KCFI wrapping to call_value pattern if needed.  */
+rtx
+riscv_maybe_wrap_call_value_with_kcfi (rtx pat, rtx addr)
+{
+  /* Only indirect calls need KCFI instrumentation.  */
+  bool is_direct_call = SYMBOL_REF_P (addr);
+  if (!is_direct_call)
+    {
+      rtx kcfi_type_rtx = kcfi_get_call_type_id ();
+      if (kcfi_type_rtx)
+	{
+	  /* Extract the SET from the PARALLEL and wrap its CALL with KCFI */
+	  rtx set_rtx = XVECEXP (pat, 0, 0);
+	  rtx call_rtx = SET_SRC (set_rtx);
+	  rtx kcfi_call = gen_rtx_KCFI (VOIDmode, call_rtx, kcfi_type_rtx);
+
+	  /* Replace the CALL in the SET with the KCFI-wrapped call */
+	  SET_SRC (set_rtx) = kcfi_call;
+	}
+    }
+  return pat;
+}
+
+/* Output the assembly for a KCFI checked call instruction.  */
+const char *
+riscv_output_kcfi_insn (rtx_insn *insn, rtx *operands)
+{
+  /* Target register.  */
+  rtx target_reg = operands[0];
+  gcc_assert (REG_P (target_reg));
+
+  /* Get KCFI type ID.  */
+  uint32_t expected_type = (uint32_t) INTVAL (operands[3]);
+
+  /* Calculate typeid offset from call target.  */
+  HOST_WIDE_INT offset = -(4 + kcfi_patchable_entry_prefix_nops);
+
+  /* Choose scratch registers that don't conflict with target.  */
+  unsigned temp1_regnum = T1_REGNUM;
+  unsigned temp2_regnum = T2_REGNUM;
+
+  if (REGNO (target_reg) == T1_REGNUM)
+    temp1_regnum = T3_REGNUM;
+  else if (REGNO (target_reg) == T2_REGNUM)
+    temp2_regnum = T3_REGNUM;
+
+  /* Generate labels internally.  */
+  rtx trap_label = gen_label_rtx ();
+  rtx call_label = gen_label_rtx ();
+
+  /* Get label numbers for custom naming.  */
+  int trap_labelno = CODE_LABEL_NUMBER (trap_label);
+  int call_labelno = CODE_LABEL_NUMBER (call_label);
+
+  /* Generate custom label names.  */
+  char trap_name[32];
+  char call_name[32];
+  ASM_GENERATE_INTERNAL_LABEL (trap_name, "Lkcfi_trap", trap_labelno);
+  ASM_GENERATE_INTERNAL_LABEL (call_name, "Lkcfi_call", call_labelno);
+
+  /* Split expected_type for RISC-V immediate encoding.
+     If bit 11 is set, increment upper 20 bits to compensate for sign extension. */
+  int32_t lo12 = ((int32_t)(expected_type << 20)) >> 20;
+  uint32_t hi20 = ((expected_type >> 12) + ((expected_type & 0x800) ? 1 : 0)) & 0xFFFFF;
+
+  rtx temp_operands[3];
+
+  /* Load actual type from memory at offset.  */
+  temp_operands[0] = gen_rtx_REG (SImode, temp1_regnum);
+  temp_operands[1] = gen_rtx_MEM (SImode,
+                      gen_rtx_PLUS (DImode, target_reg,
+                                   GEN_INT (offset)));
+  output_asm_insn ("lw\t%0, %1", temp_operands);
+
+  /* Load expected type using lui + addiw for proper sign extension.  */
+  temp_operands[0] = gen_rtx_REG (SImode, temp2_regnum);
+  temp_operands[1] = GEN_INT (hi20);
+  output_asm_insn ("lui\t%0, %1", temp_operands);
+
+  temp_operands[0] = gen_rtx_REG (SImode, temp2_regnum);
+  temp_operands[1] = gen_rtx_REG (SImode, temp2_regnum);
+  temp_operands[2] = GEN_INT (lo12);
+  output_asm_insn ("addiw\t%0, %1, %2", temp_operands);
+
+  /* Output conditional branch to call label.  */
+  fprintf (asm_out_file, "\tbeq\t%s, %s, ", reg_names[temp1_regnum], reg_names[temp2_regnum]);
+  assemble_name (asm_out_file, call_name);
+  fputc ('\n', asm_out_file);
+
+  /* Output trap label and ebreak instruction.  */
+  ASM_OUTPUT_LABEL (asm_out_file, trap_name);
+  output_asm_insn ("ebreak", operands);
+
+  /* Use common helper for trap section entry.  */
+  rtx trap_label_sym = gen_rtx_SYMBOL_REF (Pmode, trap_name);
+  kcfi_emit_traps_section (asm_out_file, trap_label_sym);
+
+  /* Output pass/call label.  */
+  ASM_OUTPUT_LABEL (asm_out_file, call_name);
+
+  /* Execute the indirect call.  */
+  if (SIBLING_CALL_P (insn))
+    {
+      /* Tail call uses x0 (zero register) to avoid saving return address.  */
+      temp_operands[0] = gen_rtx_REG (DImode, 0);  /* x0 */
+      temp_operands[1] = target_reg;  /* target register */
+      temp_operands[2] = const0_rtx;
+      output_asm_insn ("jalr\t%0, %1, %2", temp_operands);
+    }
+  else
+    {
+      /* Regular call uses x1 (return address register).  */
+      temp_operands[0] = gen_rtx_REG (DImode, RETURN_ADDR_REGNUM);  /* x1 */
+      temp_operands[1] = target_reg;  /* target register */
+      temp_operands[2] = const0_rtx;
+      output_asm_insn ("jalr\t%0, %1, %2", temp_operands);
+    }
+
+  return "";
+}
+
 /* 'Unpack' up the internal tuning structs and update the options
     in OPTS.  The caller must have set up selected_tune and selected_arch
     as all the other target-specific codegen decisions are
@@ -15897,6 +16041,9 @@ riscv_prefetch_offset_address_p (rtx x, machine_mode mode)
 #undef TARGET_GET_FUNCTION_VERSIONS_DISPATCHER
 #define TARGET_GET_FUNCTION_VERSIONS_DISPATCHER \
   riscv_get_function_versions_dispatcher
+
+#undef TARGET_KCFI_SUPPORTED
+#define TARGET_KCFI_SUPPORTED hook_bool_void_true
 
 #undef TARGET_DOCUMENTATION_NAME
 #define TARGET_DOCUMENTATION_NAME "RISC-V"

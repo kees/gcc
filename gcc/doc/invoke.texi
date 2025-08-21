@@ -18458,6 +18458,19 @@ allowing the kernel to identify both the KCFI violation and the involved
 registers for detailed diagnostics (eliminating the need for a separate
 @code{.kcfi_traps} section as used on x86_64).
 
+On RISC-V, KCFI type identifiers are emitted as a @code{.word ID}
+directive (a 32-bit constant) before the function entry, similar to AArch64.
+RISC-V's natural 4-byte instruction alignment eliminates the need for
+additional padding NOPs.  When used with @option{-fpatchable-function-entry},
+the type identifier is placed before any patchable NOPs.  The runtime check
+loads the actual type using @code{lw t1, OFFSET(target_reg)}, where the
+offset accounts for any prefix NOPs, constructs the expected type using
+@code{lui} and @code{addiw} instructions into @code{t2}, and compares them
+with @code{beq}.  Type mismatches trigger an @code{ebreak} instruction.
+Like x86_64, RISC-V uses a @code{.kcfi_traps} section to map trap locations
+to their corresponding function entry points for debugging (RISC-V lacks
+ESR-style trap encoding unlike AArch64).
+
 KCFI is intended primarily for kernel code and may not be suitable
 for user-space applications that rely on techniques incompatible
 with strict type checking of indirect calls.

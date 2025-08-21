@@ -3982,9 +3982,24 @@
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[0], 0));
-  emit_call_insn (gen_sibcall_internal (target, operands[1], operands[2]));
+  rtx pat = gen_sibcall_internal (target, operands[1], operands[2]);
+  pat = riscv_maybe_wrap_call_with_kcfi (pat, target);
+  emit_call_insn (pat);
   DONE;
 })
+
+;; KCFI sibling call - matches KCFI wrapper RTL
+(define_insn "*kcfi_sibcall_insn"
+  [(kcfi (call (mem:SI (match_operand:DI 0 "call_insn_operand" "l"))
+               (match_operand 1 ""))
+         (match_operand 3 "const_int_operand"))
+   (use (unspec:SI [(match_operand 2 "const_int_operand")] UNSPEC_CALLEE_CC))]
+  "SIBLING_CALL_P (insn)"
+{
+  return riscv_output_kcfi_insn (insn, operands);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "24")])
 
 (define_insn "sibcall_internal"
   [(call (mem:SI (match_operand 0 "call_insn_operand" "j,S,U"))
@@ -4009,10 +4024,25 @@
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[1], 0));
-  emit_call_insn (gen_sibcall_value_internal (operands[0], target, operands[2],
-					      operands[3]));
+  rtx pat = gen_sibcall_value_internal (operands[0], target, operands[2], operands[3]);
+  pat = riscv_maybe_wrap_call_value_with_kcfi (pat, target);
+  emit_call_insn (pat);
   DONE;
 })
+
+;; KCFI sibling call with return value - matches KCFI wrapper RTL
+(define_insn "*kcfi_sibcall_value_insn"
+  [(set (match_operand 0 "")
+	(kcfi (call (mem:SI (match_operand:DI 1 "call_insn_operand" "l"))
+		    (match_operand 2 ""))
+	      (match_operand 4 "const_int_operand")))
+   (use (unspec:SI [(match_operand 3 "const_int_operand")] UNSPEC_CALLEE_CC))]
+  "SIBLING_CALL_P (insn)"
+{
+  return riscv_output_kcfi_insn (insn, &operands[1]);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "24")])
 
 (define_insn "sibcall_value_internal"
   [(set (match_operand 0 "" "")
@@ -4037,9 +4067,25 @@
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[0], 0));
-  emit_call_insn (gen_call_internal (target, operands[1], operands[2]));
+  rtx pat = gen_call_internal (target, operands[1], operands[2]);
+  pat = riscv_maybe_wrap_call_with_kcfi (pat, target);
+  emit_call_insn (pat);
   DONE;
 })
+
+;; KCFI indirect call - matches KCFI wrapper RTL
+(define_insn "*kcfi_call_internal"
+  [(kcfi (call (mem:SI (match_operand:DI 0 "call_insn_operand" "l"))
+               (match_operand 1 "" ""))
+         (match_operand 3 "const_int_operand"))
+   (use (unspec:SI [(match_operand 2 "const_int_operand")] UNSPEC_CALLEE_CC))
+   (clobber (reg:SI RETURN_ADDR_REGNUM))]
+  "!SIBLING_CALL_P (insn)"
+{
+  return riscv_output_kcfi_insn (insn, operands);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "24")])
 
 (define_insn "call_internal"
   [(call (mem:SI (match_operand 0 "call_insn_operand" "l,S,U"))
@@ -4065,10 +4111,26 @@
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[1], 0));
-  emit_call_insn (gen_call_value_internal (operands[0], target, operands[2],
-					   operands[3]));
+  rtx pat = gen_call_value_internal (operands[0], target, operands[2], operands[3]);
+  pat = riscv_maybe_wrap_call_value_with_kcfi (pat, target);
+  emit_call_insn (pat);
   DONE;
 })
+
+;; KCFI call with return value - matches KCFI wrapper RTL
+(define_insn "*kcfi_call_value_insn"
+  [(set (match_operand 0 "" "")
+	(kcfi (call (mem:SI (match_operand:DI 1 "call_insn_operand" "l"))
+		    (match_operand 2 "" ""))
+	      (match_operand 4 "const_int_operand")))
+   (use (unspec:SI [(match_operand 3 "const_int_operand")] UNSPEC_CALLEE_CC))
+   (clobber (reg:SI RETURN_ADDR_REGNUM))]
+  "!SIBLING_CALL_P (insn)"
+{
+  return riscv_output_kcfi_insn (insn, &operands[1]);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "24")])
 
 (define_insn "call_value_internal"
   [(set (match_operand 0 "" "")
