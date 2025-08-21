@@ -94,6 +94,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "i386-builtins.h"
 #include "i386-expand.h"
 #include "asan.h"
+#include "kcfi.h"
 
 /* Split one or more double-mode RTL references into pairs of half-mode
    references.  The RTL can be REG, offsettable MEM, integer constant, or
@@ -10279,8 +10280,9 @@ ix86_expand_call (rtx retval, rtx fnaddr, rtx callarg1,
   unsigned int vec_len = 0;
   tree fndecl;
   bool call_no_callee_saved_registers = false;
+  bool is_direct_call = SYMBOL_REF_P (XEXP (fnaddr, 0));
 
-  if (SYMBOL_REF_P (XEXP (fnaddr, 0)))
+  if (is_direct_call)
     {
       fndecl = SYMBOL_REF_DECL (XEXP (fnaddr, 0));
       if (fndecl)
@@ -10317,7 +10319,7 @@ ix86_expand_call (rtx retval, rtx fnaddr, rtx callarg1,
   if (TARGET_MACHO && !TARGET_64BIT)
     {
 #if TARGET_MACHO
-      if (flag_pic && SYMBOL_REF_P (XEXP (fnaddr, 0)))
+      if (flag_pic && is_direct_call)
 	fnaddr = machopic_indirect_call_target (fnaddr);
 #endif
     }
@@ -10401,7 +10403,7 @@ ix86_expand_call (rtx retval, rtx fnaddr, rtx callarg1,
   if (ix86_cmodel == CM_LARGE_PIC
       && !TARGET_PECOFF
       && MEM_P (fnaddr)
-      && SYMBOL_REF_P (XEXP (fnaddr, 0))
+      && is_direct_call
       && !local_symbolic_operand (XEXP (fnaddr, 0), VOIDmode))
     fnaddr = gen_rtx_MEM (QImode, construct_plt_address (XEXP (fnaddr, 0)));
   /* Since x32 GOT slot is 64 bit with zero upper 32 bits, indirect
@@ -10432,6 +10434,19 @@ ix86_expand_call (rtx retval, rtx fnaddr, rtx callarg1,
     }
 
   call = gen_rtx_CALL (VOIDmode, fnaddr, callarg1);
+
+  /* Only indirect calls need KCFI instrumentation.  */
+  rtx kcfi_type_rtx = is_direct_call ? NULL_RTX : kcfi_get_call_type_id ();
+  if (kcfi_type_rtx)
+    {
+      /* Wrap call with KCFI.  */
+      call = gen_rtx_KCFI (VOIDmode, call, kcfi_type_rtx);
+
+      /* Add KCFI clobbers for the insn sequence.  */
+      clobber_reg (&use, gen_rtx_REG (DImode, R10_REG));
+      clobber_reg (&use, gen_rtx_REG (DImode, R11_REG));
+      clobber_reg (&use, gen_rtx_REG (CCmode, FLAGS_REG));
+    }
 
   if (retval)
     call = gen_rtx_SET (retval, call);

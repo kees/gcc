@@ -377,6 +377,7 @@ extern enum attr_cpu ix86_schedule;
 
 extern bool ix86_nopic_noplt_attribute_p (rtx call_op);
 extern const char * ix86_output_call_insn (rtx_insn *insn, rtx call_op);
+extern const char * ix86_output_kcfi_insn (rtx_insn *insn, rtx *operands);
 extern const char * ix86_output_indirect_jmp (rtx call_op);
 extern const char * ix86_output_function_return (bool long_p);
 extern const char * ix86_output_indirect_function_return (rtx ret_op);

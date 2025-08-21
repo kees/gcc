@@ -18404,6 +18404,29 @@ and without changing the entry points of the target functions. Only
 functions that have referenced by their address receive the KCFI preamble
 instrumentation.
 
+Platform-specific implementation details:
+
+On x86_64, KCFI type identifiers are emitted as a @code{movl $ID, %eax}
+instruction before the function entry.  The implementation ensures that
+type IDs never collide with ENDBR instruction encodings.  When used
+with @option{-fpatchable-function-entry}, the type identifier is
+placed before any patchable NOPs, with appropriate alignment to
+maintain a 16-byte boundary for the function entry.  KCFI automatically
+implies @option{-mindirect-branch-register}, forcing all indirect calls
+and jumps to use registers instead of memory operands.  The runtime
+check loads the type ID from the target function into @code{%r10d} and
+uses an @code{addl} instruction to add the negative expected type ID,
+effectively zeroing the register if the types match.  A conditional
+jump follows to either continue execution or trap on mismatch.  The
+check sequence uses @code{%r10d} and @code{%r11d} as scratch registers.
+Trap locations are recorded in a special @code{.kcfi_traps} section
+that maps trap sites to their corresponding function entry points,
+enabling debuggers and crash handlers to identify KCFI violations.
+The exact instruction sequences for both the KCFI preamble and the
+check-call bundle are considered ABI, as the Linux kernel may
+optionally rewrite these areas at boot time to mitigate detected CPU
+errata.
+
 KCFI is intended primarily for kernel code and may not be suitable
 for user-space applications that rely on techniques incompatible
 with strict type checking of indirect calls.

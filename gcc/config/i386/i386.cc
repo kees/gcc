@@ -98,6 +98,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "i386-builtins.h"
 #include "i386-expand.h"
 #include "i386-features.h"
+#include "kcfi.h"
 #include "function-abi.h"
 #include "rtl-error.h"
 #include "gimple-pretty-print.h"
@@ -1698,6 +1699,19 @@ ix86_function_naked (const_tree fn)
     return true;
 
   return false;
+}
+
+/* Apply x86-64 specific masking to KCFI type ID.  */
+static uint32_t
+ix86_kcfi_mask_type_id (uint32_t type_id)
+{
+  /* Avoid embedding ENDBR instructions in KCFI type IDs.
+     ENDBR64: 0xfa1e0ff3, ENDBR32: 0xfb1e0ff3
+     If the type ID matches either instruction encoding, increment by 1.  */
+  if (type_id == 0xfa1e0ff3U || type_id == 0xfb1e0ff3U)
+    return type_id + 1;
+
+  return type_id;
 }
 
 /* Write the extra assembler code needed to declare a function properly.  */
@@ -28468,6 +28482,110 @@ ix86_set_handled_components (sbitmap components)
 	cfun->machine->frame.save_regs_using_mov = true;
       }
 }
+
+/* Output the assembly for a KCFI checked call instruction.  */
+const char *
+ix86_output_kcfi_insn (rtx_insn *insn, rtx *operands)
+{
+  /* Target is guaranteed to be in a register due to
+     TARGET_INDIRECT_BRANCH_REGISTER.  */
+  rtx target_reg = operands[0];
+  gcc_assert (REG_P (target_reg));
+
+  /* In thunk-extern mode, the register must be R11 for FineIBT
+     compatibility. Should this be handled via constraints?  */
+  if (cfun->machine->indirect_branch_type == indirect_branch_thunk_extern)
+    {
+      if (REGNO (target_reg) != R11_REG)
+	{
+	  /* Emit move from current target to R11.  */
+	  target_reg = gen_rtx_REG (DImode, R11_REG);
+	  rtx r11_operands[2] = { operands[0], target_reg };
+	  output_asm_insn ("movq\t%0, %1", r11_operands);
+	}
+    }
+
+  /* Generate labels internally.  */
+  rtx trap_label = gen_label_rtx ();
+  rtx call_label = gen_label_rtx ();
+
+  /* Get label numbers for custom naming.  */
+  int trap_labelno = CODE_LABEL_NUMBER (trap_label);
+  int call_labelno = CODE_LABEL_NUMBER (call_label);
+
+  /* Generate custom label names.  */
+  char trap_name[32];
+  char call_name[32];
+  ASM_GENERATE_INTERNAL_LABEL (trap_name, "Lkcfi_trap", trap_labelno);
+  ASM_GENERATE_INTERNAL_LABEL (call_name, "Lkcfi_call", call_labelno);
+
+  /* Choose scratch register: r10 by default, r11 if r10 is the target.  */
+  bool target_is_r10 = (REGNO (target_reg) == R10_REG);
+  int scratch_reg = target_is_r10 ? R11_REG : R10_REG;
+
+  /* Get KCFI type ID from operand */
+  uint32_t type_id = (uint32_t) INTVAL (operands[2]);
+
+  /* Convert to inverse for the check (0 - hash) */
+  uint32_t inverse_type_id = (uint32_t)(0 - type_id);
+
+  /* Calculate offset to typeid from target address.  */
+  HOST_WIDE_INT offset = -(4 + kcfi_patchable_entry_prefix_nops);
+
+  /* Output complete KCFI check + call/sibcall sequence atomically.  */
+  rtx inverse_type_id_rtx = gen_int_mode (inverse_type_id, SImode);
+  rtx mov_operands[2] = { inverse_type_id_rtx, gen_rtx_REG (SImode, scratch_reg) };
+  output_asm_insn ("movl\t$%c0, %1", mov_operands);
+
+  /* Create memory operand for the addl instruction.  */
+  rtx offset_rtx = gen_int_mode (offset, DImode);
+  rtx mem_op = gen_rtx_MEM (SImode, gen_rtx_PLUS (DImode, target_reg, offset_rtx));
+  rtx add_operands[2] = { mem_op, gen_rtx_REG (SImode, scratch_reg) };
+  output_asm_insn ("addl\t%0, %1", add_operands);
+
+  /* Output conditional jump to call label.  */
+  fputs ("\tje\t", asm_out_file);
+  assemble_name (asm_out_file, call_name);
+  fputc ('\n', asm_out_file);
+
+  /* Output trap label and instruction.  */
+  ASM_OUTPUT_LABEL (asm_out_file, trap_name);
+  output_asm_insn ("ud2", operands);
+
+  /* Use common helper for trap section entry.  */
+  rtx trap_label_sym = gen_rtx_SYMBOL_REF (Pmode, trap_name);
+  kcfi_emit_traps_section (asm_out_file, trap_label_sym);
+
+  /* Output pass/call label.  */
+  ASM_OUTPUT_LABEL (asm_out_file, call_name);
+
+  /* Finally emit the protected call or sibling call.  */
+  if (SIBLING_CALL_P (insn))
+    return ix86_output_indirect_jmp (target_reg);
+  else
+    return ix86_output_call_insn (insn, target_reg);
+}
+
+/* Emit x86_64-specific type ID instruction and return instruction size.  */
+static int
+ix86_kcfi_emit_type_id (FILE *file, uint32_t type_id)
+{
+  /* Emit movl instruction with type ID if file is not NULL.  */
+  if (file)
+    fprintf (file, "\tmovl\t$0x%08x, %%eax\n", type_id);
+
+  /* x86_64 uses 5-byte movl instruction for type ID.  */
+  return 5;
+}
+
+#undef TARGET_KCFI_SUPPORTED
+#define TARGET_KCFI_SUPPORTED hook_bool_void_true
+
+#undef TARGET_KCFI_MASK_TYPE_ID
+#define TARGET_KCFI_MASK_TYPE_ID ix86_kcfi_mask_type_id
+
+#undef TARGET_KCFI_EMIT_TYPE_ID
+#define TARGET_KCFI_EMIT_TYPE_ID ix86_kcfi_emit_type_id
 
 #undef TARGET_SHRINK_WRAP_GET_SEPARATE_COMPONENTS
 #define TARGET_SHRINK_WRAP_GET_SEPARATE_COMPONENTS ix86_get_separate_components

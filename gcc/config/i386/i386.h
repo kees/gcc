@@ -3038,7 +3038,8 @@ extern void debug_dispatch_window (int);
 
 #define TARGET_INDIRECT_BRANCH_REGISTER \
   (ix86_indirect_branch_register \
-   || cfun->machine->indirect_branch_type != indirect_branch_keep)
+   || cfun->machine->indirect_branch_type != indirect_branch_keep \
+   || (flag_sanitize & SANITIZE_KCFI))
 
 #define IX86_HLE_ACQUIRE (1 << 16)
 #define IX86_HLE_RELEASE (1 << 17)
