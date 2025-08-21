@@ -1617,6 +1617,7 @@ OBJS = \
 	lto-section-out.o \
 	lto-opts.o \
 	lto-compress.o \
+	mangle.o \
 	mcf.o \
 	mode-switching.o \
 	modulo-sched.o \
