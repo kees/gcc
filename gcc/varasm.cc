@@ -57,6 +57,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "asan.h"
 #include "rtl-iter.h"
+#include "kcfi.h"
 #include "file-prefix-map.h" /* remap_debug_filename()  */
 #include "alloc-pool.h"
 #include "toplev.h"
@@ -2199,6 +2200,9 @@ assemble_start_function (tree decl, const char *fnname)
   unsigned short patch_area_size = crtl->patch_area_size;
   unsigned short patch_area_entry = crtl->patch_area_entry;
 
+  /* Emit KCFI preamble before any patchable areas.  */
+  kcfi_emit_preamble (asm_out_file, decl, fnname);
+
   /* Emit the patching area before the entry label, if any.  */
   if (patch_area_entry > 0)
     targetm.asm_out.print_patchable_function_entry (asm_out_file,
@@ -2767,6 +2771,19 @@ assemble_external_real (tree decl)
       /* Some systems do require some output.  */
       SYMBOL_REF_USED (XEXP (rtl, 0)) = 1;
       ASM_OUTPUT_EXTERNAL (asm_out_file, decl, XSTR (XEXP (rtl, 0), 0));
+
+      /* Emit KCFI type ID symbol for external function declarations that are address-taken.  */
+      struct cgraph_node *node = (TREE_CODE (decl) == FUNCTION_DECL) ? cgraph_node::get (decl) : NULL;
+      if (flag_sanitize & SANITIZE_KCFI
+	  && TREE_CODE (decl) == FUNCTION_DECL
+	  && !DECL_INITIAL (decl)  /* Only for external declarations (no function body) */
+	  && node && node->address_taken)  /* Use direct cgraph analysis for address-taken check.  */
+	{
+	  const char *name = XSTR (XEXP (rtl, 0), 0);
+	  /* Strip any encoding prefixes like '*' from symbol name.  */
+	  name = targetm.strip_name_encoding (name);
+	  emit_kcfi_typeid_symbol (asm_out_file, decl, name);
+	}
     }
 }
 #endif
@@ -7283,16 +7300,25 @@ default_elf_asm_named_section (const char *name, unsigned int flags,
 	fprintf (asm_out_file, ",%d", flags & SECTION_ENTSIZE);
       if (flags & SECTION_LINK_ORDER)
 	{
-	  /* For now, only section "__patchable_function_entries"
-	     adopts flag SECTION_LINK_ORDER, internal label LPFE*
-	     was emitted in default_print_patchable_function_entry,
-	     just place it here for linked_to section.  */
-	  gcc_assert (!strcmp (name, "__patchable_function_entries"));
-	  fprintf (asm_out_file, ",");
-	  char buf[256];
-	  ASM_GENERATE_INTERNAL_LABEL (buf, "LPFE",
-				       current_function_funcdef_no);
-	  assemble_name_raw (asm_out_file, buf);
+	  if (!strcmp (name, "__patchable_function_entries"))
+	    {
+	      /* For patchable function entries, internal label LPFE*
+		 was emitted in default_print_patchable_function_entry,
+		 just place it here for linked_to section.  */
+	      fprintf (asm_out_file, ",");
+	      char buf[256];
+	      ASM_GENERATE_INTERNAL_LABEL (buf, "LPFE",
+					   current_function_funcdef_no);
+	      assemble_name_raw (asm_out_file, buf);
+	    }
+	  else if (!strcmp (name, ".kcfi_traps"))
+	    {
+	      /* KCFI traps section links to .text section.  */
+	      fprintf (asm_out_file, ",.text");
+	    }
+	  else
+	    internal_error ("unexpected use of %<SECTION_LINK_ORDER%> by section %qs",
+			    name);
 	}
       if (HAVE_COMDAT_GROUP && (flags & SECTION_LINKONCE))
 	{

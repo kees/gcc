@@ -18382,6 +18382,41 @@ possible by specifying the command-line options
 @option{--param hwasan-instrument-allocas=1} respectively. Using a random frame
 tag is not implemented for kernel instrumentation.
 
+@opindex fsanitize=kcfi
+@item -fsanitize=kcfi
+Enable Kernel Control Flow Integrity (KCFI), a lightweight control
+flow integrity mechanism designed for operating system kernels.
+KCFI instruments indirect function calls to verify that the target
+function has the expected type signature at runtime.  Each function
+receives a unique type identifier computed from a hash of its function
+prototype (including parameter types and return type).  Before each
+indirect call, the implementation inserts a check to verify that the
+target function's type identifier matches the expected identifier
+for the call site, terminating the program if a mismatch is detected.
+This provides forward-edge control flow protection against attacks that
+attempt to redirect indirect calls to unintended targets.
+
+The implementation adds minimal runtime overhead and does not require
+runtime library support, making it suitable for kernel environments.
+The type identifier is placed before the function entry point,
+allowing runtime verification without additional metadata structures,
+and without changing the entry points of the target functions. Only
+functions that have referenced by their address receive the KCFI preamble
+instrumentation.
+
+KCFI is intended primarily for kernel code and may not be suitable
+for user-space applications that rely on techniques incompatible
+with strict type checking of indirect calls.
+
+Note that KCFI is incompatible with function-specific
+@code{patchable_function_entry} attributes because KCFI call sites
+cannot know about function-specific patchable entry settings in different
+translation units.  Only the global @option{-fpatchable-function-entry}
+command-line option is supported with KCFI.
+
+Use @option{-fdump-tree-kcfi} to examine the computed type identifiers
+and their corresponding mangled type strings during compilation.
+
 @opindex fsanitize=pointer-compare
 @item -fsanitize=pointer-compare
 Instrument comparison operation (<, <=, >, >=) with pointer operands.

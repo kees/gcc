@@ -1177,6 +1177,11 @@ reg_referenced_p (const_rtx x, const_rtx body)
     case IF_THEN_ELSE:
       return reg_overlap_mentioned_p (x, body);
 
+    case KCFI:
+      /* For KCFI wrapper, check both the wrapped call and the type ID */
+      return (reg_overlap_mentioned_p (x, XEXP (body, 0))
+              || reg_overlap_mentioned_p (x, XEXP (body, 1)));
+
     case TRAP_IF:
       return reg_overlap_mentioned_p (x, TRAP_CONDITION (body));
 

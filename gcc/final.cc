@@ -2094,6 +2094,9 @@ call_from_call_insn (const rtx_call_insn *insn)
 	case SET:
 	  x = XEXP (x, 1);
 	  break;
+	case KCFI:
+	  x = XEXP (x, 0);
+	  break;
 	}
     }
   return x;

@@ -142,6 +142,7 @@ enum gf_mask {
     GF_CALL_ALLOCA_FOR_VAR	= 1 << 5,
     GF_CALL_INTERNAL		= 1 << 6,
     GF_CALL_CTRL_ALTERING       = 1 << 7,
+    GF_CALL_INLINED_FROM_KCFI_NOSANTIZE = 1 << 8,
     GF_CALL_MUST_TAIL_CALL	= 1 << 9,
     GF_CALL_BY_DESCRIPTOR	= 1 << 10,
     GF_CALL_NOCF_CHECK		= 1 << 11,
@@ -3487,6 +3488,26 @@ gimple_call_from_thunk_p (gcall *s)
   return (s->subcode & GF_CALL_FROM_THUNK) != 0;
 }
 
+/* If INLINED_FROM_KCFI_NOSANTIZE_P is true, mark GIMPLE_CALL S as being
+   inlined from a function with no_sanitize("kcfi").  */
+
+inline void
+gimple_call_set_inlined_from_kcfi_nosantize (gcall *s, bool inlined_from_kcfi_nosantize_p)
+{
+  if (inlined_from_kcfi_nosantize_p)
+    s->subcode |= GF_CALL_INLINED_FROM_KCFI_NOSANTIZE;
+  else
+    s->subcode &= ~GF_CALL_INLINED_FROM_KCFI_NOSANTIZE;
+}
+
+/* Return true if GIMPLE_CALL S was inlined from a function with
+   no_sanitize("kcfi").  */
+
+inline bool
+gimple_call_inlined_from_kcfi_nosantize_p (const gcall *s)
+{
+  return (s->subcode & GF_CALL_INLINED_FROM_KCFI_NOSANTIZE) != 0;
+}
 
 /* If FROM_NEW_OR_DELETE_P is true, mark GIMPLE_CALL S as being a call
    to operator new or delete created from a new or delete expression.  */

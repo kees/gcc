@@ -7589,6 +7589,44 @@ DEFHOOKPOD
 The default value is NULL.",
  const char *, NULL)
 
+/* Kernel Control Flow Integrity (KCFI) hooks.  */
+#undef HOOK_PREFIX
+#define HOOK_PREFIX "TARGET_KCFI_"
+HOOK_VECTOR (TARGET_KCFI, kcfi)
+
+DEFHOOK
+(supported,
+ "Return true if the target supports Kernel Control Flow Integrity (KCFI).\n\
+This hook indicates whether the target has implemented the necessary RTL\n\
+patterns and infrastructure to support KCFI instrumentation.  The default\n\
+implementation returns false.",
+ bool, (void),
+ hook_bool_void_false)
+
+DEFHOOK
+(mask_type_id,
+ "Apply architecture-specific masking to KCFI type ID.  This hook allows\n\
+targets to apply bit masks or other transformations to the computed KCFI\n\
+type identifier to match the target's specific requirements.  The default\n\
+implementation returns the type ID unchanged.",
+ uint32_t, (uint32_t type_id),
+ NULL)
+
+DEFHOOK
+(emit_type_id,
+ "Emit architecture-specific type ID instruction for KCFI preambles\n\
+and return the size of the instruction in bytes.\n\
+@var{file} is the assembly output stream and @var{type_id} is the KCFI\n\
+type identifier to emit.  If @var{file} is NULL, skip emission and only\n\
+return the size.  If not overridden, the default fallback emits a\n\
+@code{.word} directive with the type ID and returns 4 bytes.  Targets can\n\
+override this to emit different instruction sequences and return their\n\
+corresponding sizes.",
+ int, (FILE *file, uint32_t type_id),
+ NULL)
+
+HOOK_VECTOR_END (kcfi)
+
 /* Close the 'struct gcc_target' definition.  */
 HOOK_VECTOR_END (C90_EMPTY_HACK)
 

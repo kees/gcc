@@ -1591,6 +1591,7 @@ OBJS = \
 	ira-emit.o \
 	ira-lives.o \
 	jump.o \
+	kcfi.o \
 	langhooks.o \
 	late-combine.o \
 	lcm.o \

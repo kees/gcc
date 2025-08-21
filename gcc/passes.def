@@ -52,6 +52,7 @@ along with GCC; see the file COPYING3.  If not see
   NEXT_PASS (pass_ipa_auto_profile_offline);
   NEXT_PASS (pass_ipa_free_lang_data);
   NEXT_PASS (pass_ipa_function_and_variable_visibility);
+  NEXT_PASS (pass_ipa_kcfi);
   NEXT_PASS (pass_ipa_strub_mode);
   NEXT_PASS (pass_build_ssa_passes);
   PUSH_INSERT_PASSES_WITHIN (pass_build_ssa_passes)
@@ -275,6 +276,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_sink_code, false /* unsplit edges */);
       NEXT_PASS (pass_sancov);
       NEXT_PASS (pass_asan);
+      NEXT_PASS (pass_kcfi);
       NEXT_PASS (pass_tsan);
       NEXT_PASS (pass_dse, true /* use DR analysis */);
       NEXT_PASS (pass_dce, false /* update_address_taken_p */, false /* remove_unused_locals */);
@@ -443,6 +445,7 @@ along with GCC; see the file COPYING3.  If not see
   NEXT_PASS (pass_sancov_O0);
   NEXT_PASS (pass_lower_switch_O0);
   NEXT_PASS (pass_asan_O0);
+  NEXT_PASS (pass_kcfi_O0);
   NEXT_PASS (pass_tsan_O0);
   NEXT_PASS (pass_musttail);
   NEXT_PASS (pass_sanopt);

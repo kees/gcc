@@ -2851,6 +2851,12 @@ df_uses_record (class df_collection_rec *collection_rec,
       /* If we're clobbering a REG then we have a def so ignore.  */
       return;
 
+    case KCFI:
+      /* KCFI wraps other RTL - process the wrapped RTL.  */
+      df_uses_record (collection_rec, &XEXP (x, 0), ref_type, bb, insn_info, flags);
+      /* The type ID operand (XEXP (x, 1)) doesn't contain register uses.  */
+      return;
+
     case MEM:
       df_uses_record (collection_rec,
 		      &XEXP (x, 0), DF_REF_REG_MEM_LOAD,

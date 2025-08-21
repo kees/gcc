@@ -67,6 +67,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "asan.h"
 #include "tsan.h"
+#include "kcfi.h"
 #include "plugin.h"
 #include "context.h"
 #include "pass_manager.h"
@@ -1737,6 +1738,16 @@ process_options ()
       else if (flag_exceptions)
 	error_at (UNKNOWN_LOCATION, "%<-fsanitize=shadow-call-stack%> "
 		  "requires %<-fno-exceptions%>");
+    }
+
+  if (flag_sanitize & SANITIZE_KCFI)
+    {
+      if (!targetm.kcfi.supported ())
+	sorry ("%<-fsanitize=kcfi%> not supported by this target");
+
+      /* KCFI is supported for only C at this time.  */
+      if (!lang_GNU_C ())
+	sorry ("%<-fsanitize=kcfi%> is only supported for C");
     }
 
   HOST_WIDE_INT patch_area_size, patch_area_start;

@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimplify.h"
 #include "tree-pretty-print.h"
 #include "gcc-rich-location.h"
+#include "asan.h"
 #include "gcc-urlifier.h"
 
 static tree handle_packed_attribute (tree *, tree, tree, int, bool *);
@@ -6508,6 +6509,17 @@ static tree
 handle_patchable_function_entry_attribute (tree *, tree name, tree args,
 					   int, bool *no_add_attrs)
 {
+  /* Function-specific patchable_function_entry attribute is incompatible
+     with KCFI because KCFI callsites cannot know about function-specific
+     patchable entry settings on a preamble in a different translation
+     unit.  */
+  if (sanitize_flags_p (SANITIZE_KCFI))
+    {
+      error ("%qE attribute cannot be used with %<-fsanitize=kcfi%>", name);
+      *no_add_attrs = true;
+      return NULL_TREE;
+    }
+
   for (; args; args = TREE_CHAIN (args))
     {
       tree val = TREE_VALUE (args);

@@ -3166,6 +3166,7 @@ This describes the stack layout and calling conventions.
 * Tail Calls::
 * Shrink-wrapping separate components::
 * Stack Smashing Protection::
+* Kernel Control Flow Integrity::
 * Miscellaneous Register Hooks::
 @end menu
 
@@ -5430,6 +5431,36 @@ enum type.  PREFIX is used for bash completion and allows an implementation
 to return more specific completion based on the prefix.  All string values
 should be allocated from heap memory and consumers should release them.
 The result will be pruned to cases with PREFIX if not NULL.
+@end deftypefn
+
+@node Kernel Control Flow Integrity
+@subsection Kernel Control Flow Integrity
+@cindex kernel control flow integrity
+@cindex KCFI
+
+@deftypefn {Target Hook} bool TARGET_KCFI_SUPPORTED (void)
+Return true if the target supports Kernel Control Flow Integrity (KCFI).
+This hook indicates whether the target has implemented the necessary RTL
+patterns and infrastructure to support KCFI instrumentation.  The default
+implementation returns false.
+@end deftypefn
+
+@deftypefn {Target Hook} uint32_t TARGET_KCFI_MASK_TYPE_ID (uint32_t @var{type_id})
+Apply architecture-specific masking to KCFI type ID.  This hook allows
+targets to apply bit masks or other transformations to the computed KCFI
+type identifier to match the target's specific requirements.  The default
+implementation returns the type ID unchanged.
+@end deftypefn
+
+@deftypefn {Target Hook} int TARGET_KCFI_EMIT_TYPE_ID (FILE *@var{file}, uint32_t @var{type_id})
+Emit architecture-specific type ID instruction for KCFI preambles
+and return the size of the instruction in bytes.
+@var{file} is the assembly output stream and @var{type_id} is the KCFI
+type identifier to emit.  If @var{file} is NULL, skip emission and only
+return the size.  If not overridden, the default fallback emits a
+@code{.word} directive with the type ID and returns 4 bytes.  Targets can
+override this to emit different instruction sequences and return their
+corresponding sizes.
 @end deftypefn
 
 @node Miscellaneous Register Hooks

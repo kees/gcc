@@ -2433,6 +2433,7 @@ This describes the stack layout and calling conventions.
 * Tail Calls::
 * Shrink-wrapping separate components::
 * Stack Smashing Protection::
+* Kernel Control Flow Integrity::
 * Miscellaneous Register Hooks::
 @end menu
 
@@ -3806,6 +3807,17 @@ generic code.
 @hook TARGET_SUPPORTS_SPLIT_STACK
 
 @hook TARGET_GET_VALID_OPTION_VALUES
+
+@node Kernel Control Flow Integrity
+@subsection Kernel Control Flow Integrity
+@cindex kernel control flow integrity
+@cindex KCFI
+
+@hook TARGET_KCFI_SUPPORTED
+
+@hook TARGET_KCFI_MASK_TYPE_ID
+
+@hook TARGET_KCFI_EMIT_TYPE_ID
 
 @node Miscellaneous Register Hooks
 @subsection Miscellaneous register hooks

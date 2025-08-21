@@ -318,6 +318,12 @@ DEF_RTL_EXPR(CLOBBER, "clobber", "e", RTX_EXTRA)
 
 DEF_RTL_EXPR(CALL, "call", "ee", RTX_EXTRA)
 
+/* KCFI wrapper for call expressions.
+   Operand 0 is the call expression.
+   Operand 1 is the KCFI type ID (const_int).  */
+
+DEF_RTL_EXPR(KCFI, "kcfi", "ee", RTX_EXTRA)
+
 /* Return from a subroutine.  */
 
 DEF_RTL_EXPR(RETURN, "return", "", RTX_EXTRA)

@@ -2104,6 +2104,16 @@ copy_bb (copy_body_data *id, basic_block bb,
 	  /* Advance iterator now before stmt is moved to seq_gsi.  */
 	  gsi_next (&stmts_gsi);
 
+	  /* If inlining from a function with no_sanitize("kcfi"), mark any
+	     call statements in the inlined body with the flag so they skip
+	     KCFI instrumentation.  */
+	  if (is_gimple_call (stmt)
+	      && !sanitize_flags_p (SANITIZE_KCFI, id->src_fn))
+	    {
+	      gcall *call = as_a <gcall *> (stmt);
+	      gimple_call_set_inlined_from_kcfi_nosantize (call, true);
+	    }
+
 	  if (gimple_nop_p (stmt))
 	      continue;
 
