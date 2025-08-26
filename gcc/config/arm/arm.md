@@ -8629,6 +8629,7 @@
     else
       {
 	pat = gen_call_internal (operands[0], operands[1], operands[2]);
+	pat = arm_maybe_wrap_call_with_kcfi (pat, XEXP (operands[0], 0));
 	arm_emit_call_insn (pat, XEXP (operands[0], 0), false);
       }
 
@@ -8686,6 +8687,20 @@
       operands[0] = replace_equiv_address (operands[0], tmp);
   }
 )
+
+;; KCFI indirect call - KCFI wraps just the call pattern
+(define_insn "*kcfi_call_reg"
+  [(kcfi (call (mem:SI (match_operand:SI 0 "s_register_operand" "r"))
+               (match_operand 1 "" ""))
+         (match_operand 2 "const_int_operand"))
+   (use (match_operand 3 "" ""))
+   (clobber (reg:SI LR_REGNUM))]
+  "TARGET_32BIT && !SIBLING_CALL_P (insn) && arm_ccfsm_state == 0"
+{
+  return arm_output_kcfi_insn (insn, operands);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "36")])
 
 (define_insn "*call_reg_armv5"
   [(call (mem:SI (match_operand:SI 0 "s_register_operand" "r"))
@@ -8753,6 +8768,7 @@
       {
 	pat = gen_call_value_internal (operands[0], operands[1],
 				       operands[2], operands[3]);
+	pat = arm_maybe_wrap_call_value_with_kcfi (pat, XEXP (operands[1], 0));
 	arm_emit_call_insn (pat, XEXP (operands[1], 0), false);
       }
 
@@ -8798,6 +8814,21 @@
 	operands[1] = replace_equiv_address (operands[1], tmp);
       }
   }")
+
+;; KCFI indirect call_value - KCFI wraps just the call pattern
+(define_insn "*kcfi_call_value_reg"
+  [(set (match_operand 0 "" "")
+        (kcfi (call (mem:SI (match_operand:SI 1 "s_register_operand" "r"))
+                    (match_operand 2 "" ""))
+              (match_operand 3 "const_int_operand")))
+   (use (match_operand 4 "" ""))
+   (clobber (reg:SI LR_REGNUM))]
+  "TARGET_32BIT && !SIBLING_CALL_P (insn) && arm_ccfsm_state == 0"
+{
+  return arm_output_kcfi_insn (insn, &operands[1]);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "36")])
 
 (define_insn "*call_value_reg_armv5"
   [(set (match_operand 0 "" "")
@@ -8901,6 +8932,7 @@
       operands[2] = const0_rtx;
 
     pat = gen_sibcall_internal (operands[0], operands[1], operands[2]);
+    pat = arm_maybe_wrap_call_with_kcfi (pat, XEXP (operands[0], 0));
     arm_emit_call_insn (pat, operands[0], true);
     DONE;
   }"
@@ -8935,10 +8967,25 @@
 
     pat = gen_sibcall_value_internal (operands[0], operands[1],
                                       operands[2], operands[3]);
+    pat = arm_maybe_wrap_call_value_with_kcfi (pat, XEXP (operands[1], 0));
     arm_emit_call_insn (pat, operands[1], true);
     DONE;
   }"
 )
+
+;; KCFI sibling call - KCFI wraps just the call pattern
+(define_insn "*kcfi_sibcall_insn"
+  [(kcfi (call (mem:SI (match_operand:SI 0 "s_register_operand" "Cs"))
+               (match_operand 1 "" ""))
+         (match_operand 2 "const_int_operand"))
+   (return)
+   (use (match_operand 3 "" ""))]
+  "TARGET_32BIT && SIBLING_CALL_P (insn) && arm_ccfsm_state == 0"
+{
+  return arm_output_kcfi_insn (insn, operands);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "36")])
 
 (define_insn "*sibcall_insn"
  [(call (mem:SI (match_operand:SI 0 "call_insn_operand" "Cs, US"))
@@ -8959,6 +9006,21 @@
   "
   [(set_attr "type" "call")]
 )
+
+;; KCFI sibling call with return value - KCFI wraps just the call pattern
+(define_insn "*kcfi_sibcall_value_insn"
+  [(set (match_operand 0 "" "")
+        (kcfi (call (mem:SI (match_operand:SI 1 "s_register_operand" "Cs"))
+                    (match_operand 2 "" ""))
+              (match_operand 3 "const_int_operand")))
+   (return)
+   (use (match_operand 4 "" ""))]
+  "TARGET_32BIT && SIBLING_CALL_P (insn) && arm_ccfsm_state == 0"
+{
+  return arm_output_kcfi_insn (insn, &operands[1]);
+}
+  [(set_attr "type" "call")
+   (set_attr "length" "36")])
 
 (define_insn "*sibcall_value_insn"
  [(set (match_operand 0 "" "")

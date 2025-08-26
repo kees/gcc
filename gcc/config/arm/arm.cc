@@ -77,6 +77,8 @@
 #include "aarch-common-protos.h"
 #include "machmode.h"
 #include "arm-builtins.h"
+#include "kcfi.h"
+#include "flags.h"
 
 /* This file should be included last.  */
 #include "target-def.h"
@@ -35802,6 +35804,148 @@ arm_mode_base_reg_class (machine_mode mode)
 
   return MODE_BASE_REG_REG_CLASS (mode);
 }
+
+/* ARM KCFI target hook implementations.  */
+
+/* KCFI wrapper helper functions for .md file */
+
+/* Apply KCFI wrapping to call pattern if needed.  */
+rtx
+arm_maybe_wrap_call_with_kcfi (rtx pat, rtx addr)
+{
+  /* Only indirect calls need KCFI instrumentation.  */
+  bool is_direct_call = SYMBOL_REF_P (addr);
+  if (!is_direct_call)
+    {
+      rtx kcfi_type_rtx = kcfi_get_call_type_id ();
+      if (kcfi_type_rtx)
+	{
+	  /* Extract the CALL from the PARALLEL and wrap it with KCFI */
+	  rtx call_rtx = XVECEXP (pat, 0, 0);
+	  rtx kcfi_call = gen_rtx_KCFI (VOIDmode, call_rtx, kcfi_type_rtx);
+
+	  /* Replace the CALL in the PARALLEL with the KCFI-wrapped call */
+	  XVECEXP (pat, 0, 0) = kcfi_call;
+	}
+    }
+  return pat;
+}
+
+/* Apply KCFI wrapping to call_value pattern if needed.  */
+rtx
+arm_maybe_wrap_call_value_with_kcfi (rtx pat, rtx addr)
+{
+  /* Only indirect calls need KCFI instrumentation.  */
+  bool is_direct_call = SYMBOL_REF_P (addr);
+  if (!is_direct_call)
+    {
+      rtx kcfi_type_rtx = kcfi_get_call_type_id ();
+      if (kcfi_type_rtx)
+	{
+	  /* Extract the SET from the PARALLEL and wrap its CALL with KCFI */
+	  rtx set_rtx = XVECEXP (pat, 0, 0);
+	  rtx call_rtx = SET_SRC (set_rtx);
+	  rtx kcfi_call = gen_rtx_KCFI (VOIDmode, call_rtx, kcfi_type_rtx);
+
+	  /* Replace the CALL in the SET with the KCFI-wrapped call */
+	  SET_SRC (set_rtx) = kcfi_call;
+	}
+    }
+  return pat;
+}
+
+const char *
+arm_output_kcfi_insn (rtx_insn *insn, rtx *operands)
+{
+  /* KCFI requires movw/movt instructions for type ID loading.  */
+  if (!TARGET_HAVE_MOVT)
+    sorry ("%<-fsanitize=kcfi%> requires movw/movt instructions (ARMv7 or later)");
+
+  /* KCFI type id.  */
+  uint32_t type_id = INTVAL (operands[2]);
+
+  /* Calculate typeid offset from call target.  */
+  HOST_WIDE_INT offset = -(4 + kcfi_patchable_entry_prefix_nops);
+
+  /* Calculate trap immediate.  */
+  unsigned addr_reg_num = REGNO (operands[0]);
+  unsigned udf_immediate = 0x8000 | (0x1F << 5) | (addr_reg_num & 31);
+
+  /* Generate labels internally.  */
+  rtx trap_label = gen_label_rtx ();
+  rtx call_label = gen_label_rtx ();
+
+  /* Get label numbers for custom naming.  */
+  int trap_labelno = CODE_LABEL_NUMBER (trap_label);
+  int call_labelno = CODE_LABEL_NUMBER (call_label);
+
+  /* Generate custom label names.  */
+  char trap_name[32];
+  char call_name[32];
+  ASM_GENERATE_INTERNAL_LABEL (trap_name, "Lkcfi_trap", trap_labelno);
+  ASM_GENERATE_INTERNAL_LABEL (call_name, "Lkcfi_call", call_labelno);
+
+  /* Create memory operand for the type load */
+  rtx mem_op = gen_rtx_MEM (SImode, gen_rtx_PLUS (SImode, operands[0], GEN_INT(offset)));
+  rtx temp_operands[6];
+
+  /* Spill r0 and r1 to stack */
+  output_asm_insn ("push\t{r0, r1}", NULL);
+
+  /* Load actual type from memory using r0 */
+  temp_operands[0] = gen_rtx_REG (SImode, 0);  /* r0 */
+  temp_operands[1] = mem_op;
+  output_asm_insn ("ldr\t%0, %1", temp_operands);
+
+  /* Load expected type low 16 bits into r1 */
+  temp_operands[0] = gen_rtx_REG (SImode, 1);  /* r1 */
+  temp_operands[1] = GEN_INT (type_id & 0xFFFF);
+  output_asm_insn ("movw\t%0, %1", temp_operands);
+
+  /* Load expected type high 16 bits into r1 */
+  temp_operands[0] = gen_rtx_REG (SImode, 1);  /* r1 */
+  temp_operands[1] = GEN_INT ((type_id >> 16) & 0xFFFF);
+  output_asm_insn ("movt\t%0, %1", temp_operands);
+
+  /* Compare types */
+  temp_operands[0] = gen_rtx_REG (SImode, 0);  /* r0 */
+  temp_operands[1] = gen_rtx_REG (SImode, 1);  /* r1 */
+  output_asm_insn ("cmp\t%0, %1", temp_operands);
+
+  /* Restore r0 and r1 from stack */
+  output_asm_insn ("pop\t{r0, r1}", NULL);
+
+  /* Output conditional branch to call label.  */
+  fputs ("\tbeq\t", asm_out_file);
+  assemble_name (asm_out_file, call_name);
+  fputc ('\n', asm_out_file);
+
+  /* Output trap label and UDF instruction.  */
+  ASM_OUTPUT_LABEL (asm_out_file, trap_name);
+  temp_operands[0] = GEN_INT (udf_immediate);
+  output_asm_insn ("udf\t%0", temp_operands);
+
+  /* Output pass/call label.  */
+  ASM_OUTPUT_LABEL (asm_out_file, call_name);
+
+  /* Handle calls to lr using ip (which may be clobbered in subr anyway).  */
+  if (REGNO (operands[0]) == LR_REGNUM)
+    {
+      operands[0] = gen_rtx_REG (SImode, IP_REGNUM);
+      output_asm_insn ("mov\t%0, lr", operands);
+    }
+
+  /* Call or tail call instruction */
+  if (SIBLING_CALL_P (insn))
+    output_asm_insn ("bx\t%0", operands);
+  else
+    output_asm_insn ("blx\t%0", operands);
+
+  return "";
+}
+
+#undef TARGET_KCFI_SUPPORTED
+#define TARGET_KCFI_SUPPORTED hook_bool_void_true
 
 #undef TARGET_DOCUMENTATION_NAME
 #define TARGET_DOCUMENTATION_NAME "ARM"

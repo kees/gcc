@@ -607,6 +607,10 @@ void arm_initialize_isa (sbitmap, const enum isa_feature *);
 
 const char * arm_gen_far_branch (rtx *, int, const char * , const char *);
 
+rtx arm_maybe_wrap_call_with_kcfi (rtx, rtx);
+rtx arm_maybe_wrap_call_value_with_kcfi (rtx, rtx);
+const char *arm_output_kcfi_insn (rtx_insn *, rtx *);
+
 bool arm_mve_immediate_check(rtx, machine_mode, bool);
 
 opt_machine_mode arm_mve_data_mode (scalar_mode, poly_uint64);
